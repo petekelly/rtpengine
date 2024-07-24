@@ -349,7 +349,7 @@ void parse_rtpp_flags(const str * rtpp_flags, bencode_buffer_t * buf,
 generic:
 		/* generic one key flags */
 		if (!val.s)
-			call_ng_flags_flags(out, &key, NULL);
+			call_ng_flags_flags(&parser_ctx, &key, NULL);
 		/* generic flags with value, but no particular processing */
 		else
 			call_ng_main_flags(&parser_ctx, &key, bencode_str(buf, &val));
