@@ -243,6 +243,8 @@ typedef struct ng_parser_ctx ng_parser_ctx_t;
 struct ng_parser {
 	void (*dict_iter)(ng_parser_ctx_t *, bencode_item_t *input,
 			void (*callback)(ng_parser_ctx_t *, str *key, bencode_item_t *value));
+	bool (*get_str)(bencode_item_t *, str *s);
+	long long (*get_int_str)(bencode_item_t *, long long def);
 };
 struct ng_parser_ctx {
 	const ng_parser_t *parser;

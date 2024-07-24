@@ -55,8 +55,12 @@ static const char* _ng_basic_errors[] = {
 
 static void call_ng_dict_iter(ng_parser_ctx_t *, bencode_item_t *input,
 		void (*callback)(ng_parser_ctx_t *, str *key, bencode_item_t *value));
+static bool call_ng_get_str(bencode_item_t *arg, str *out);
+static long long call_ng_get_int_str(bencode_item_t *arg, long long def);
 static const ng_parser_t ng_parser_native = {
 	.dict_iter = call_ng_dict_iter,
+	.get_str = call_ng_get_str,
+	.get_int_str = call_ng_get_int_str,
 };
 
 
@@ -1448,12 +1452,20 @@ static void call_ng_flags_freqs(sdp_ng_flags *out, bencode_item_t *value) {
 	}
 }
 
+static bool call_ng_get_str(bencode_item_t *arg, str *out) {
+	return bencode_get_str(arg, out) != NULL;
+}
+static long long call_ng_get_int_str(bencode_item_t *arg, long long def) {
+	return bencode_get_integer_str(arg, def);
+}
+
 void call_ng_main_flags(ng_parser_ctx_t *parser_ctx, str *key, bencode_item_t *value) {
 	str s = STR_NULL;
 	bencode_item_t *it;
 	sdp_ng_flags *out = parser_ctx->out;
+	const ng_parser_t *parser = parser_ctx->parser;
 
-	bencode_get_str(value, &s);
+	parser->get_str(value, &s);
 
 	switch (__csh_lookup(key)) {
 		case CSH_LOOKUP("address"):
@@ -1531,17 +1543,17 @@ void call_ng_main_flags(ng_parser_ctx_t *parser_ctx, str *key, bencode_item_t *v
 			break;
 		case CSH_LOOKUP("code"):
 		case CSH_LOOKUP("digit"):
-			out->digit = bencode_get_integer_str(value, out->digit);
+			out->digit = parser->get_int_str(value, out->digit);
 			if (s.len == 1)
 				out->digit = s.s[0];
 			break;
 		case CSH_LOOKUP("codec"):
-			parser_ctx->parser->dict_iter(parser_ctx, value, call_ng_codec_flags);
+			parser->dict_iter(parser_ctx, value, call_ng_codec_flags);
 			break;
 		case CSH_LOOKUP("command"):
 			break;
 		case CSH_LOOKUP("db-id"):
-			out->db_id = bencode_get_integer_str(value, out->db_id);
+			out->db_id = parser->get_int_str(value, out->db_id);
 			break;
 		case CSH_LOOKUP("direction"):
 			call_ng_direction_flag(out, value);
@@ -1606,7 +1618,7 @@ void call_ng_main_flags(ng_parser_ctx_t *parser_ctx, str *key, bencode_item_t *v
 		case CSH_LOOKUP("DTMF delay"):
 		case CSH_LOOKUP("dtmf-delay"):
 		case CSH_LOOKUP("dtmf delay"):
-			out->dtmf_delay = bencode_get_integer_str(value, out->dtmf_delay);
+			out->dtmf_delay = parser->get_int_str(value, out->dtmf_delay);
 			break;
 		case CSH_LOOKUP("dtmf-log-dest"):
 		case CSH_LOOKUP("DTMF-log-dest"):
@@ -1617,7 +1629,7 @@ void call_ng_main_flags(ng_parser_ctx_t *parser_ctx, str *key, bencode_item_t *v
 						STR_FMT(&s));
 			break;
 		case CSH_LOOKUP("duration"):
-			out->duration = bencode_get_integer_str(value, out->duration);
+			out->duration = parser->get_int_str(value, out->duration);
 			break;
 #ifdef WITH_TRANSCODING
 		case CSH_LOOKUP("DTMF-security"):
@@ -1640,7 +1652,7 @@ void call_ng_main_flags(ng_parser_ctx_t *parser_ctx, str *key, bencode_item_t *v
 			break;
 		case CSH_LOOKUP("delay-buffer"):
 		case CSH_LOOKUP("delay buffer"):
-			out->delay_buffer = bencode_get_integer_str(value, out->delay_buffer);
+			out->delay_buffer = parser->get_int_str(value, out->delay_buffer);
 			break;
 #endif
 		case CSH_LOOKUP("endpoint-learning"):
@@ -1815,19 +1827,19 @@ void call_ng_main_flags(ng_parser_ctx_t *parser_ctx, str *key, bencode_item_t *v
 			}
 			break;
 		case CSH_LOOKUP("pause"):
-			out->pause = bencode_get_integer_str(value, out->pause);
+			out->pause = parser->get_int_str(value, out->pause);
 			break;
 		case CSH_LOOKUP("player"):
 		case CSH_LOOKUP("ptime"):
 			if (out->opmode == OP_OFFER)
-				out->ptime = bencode_get_integer_str(value, 0);
+				out->ptime = parser->get_int_str(value, 0);
 			break;
 		case CSH_LOOKUP("ptime-reverse"):
 		case CSH_LOOKUP("ptime reverse"):
 		case CSH_LOOKUP("reverse ptime"):
 		case CSH_LOOKUP("reverse-ptime"):
 			if (out->opmode == OP_OFFER)
-				out->rev_ptime = bencode_get_integer_str(value, 0);
+				out->rev_ptime = parser->get_int_str(value, 0);
 			break;
 
 		case CSH_LOOKUP("received from"):
@@ -1868,7 +1880,7 @@ void call_ng_main_flags(ng_parser_ctx_t *parser_ctx, str *key, bencode_item_t *v
 			out->recording_pattern = s;
 			break;
 		case CSH_LOOKUP("repeat-times"):
-			out->repeat_times = bencode_get_integer_str(value, out->repeat_times);
+			out->repeat_times = parser->get_int_str(value, out->repeat_times);
 			break;
 		case CSH_LOOKUP("replace"):
 			call_ng_flags_str_list(out, value, call_ng_flags_replace, NULL);
@@ -1916,7 +1928,7 @@ void call_ng_main_flags(ng_parser_ctx_t *parser_ctx, str *key, bencode_item_t *v
 			}
 			break;
 		case CSH_LOOKUP("start-pos"):
-			out->start_pos = bencode_get_integer_str(value, out->start_pos);
+			out->start_pos = parser->get_int_str(value, out->start_pos);
 			break;
 		case CSH_LOOKUP("supports"):
 			call_ng_flags_str_list(out, value, call_ng_flags_supports, NULL);
@@ -1941,7 +1953,7 @@ void call_ng_main_flags(ng_parser_ctx_t *parser_ctx, str *key, bencode_item_t *v
 			break;
 		case CSH_LOOKUP("TOS"):
 		case CSH_LOOKUP("tos"):
-			out->tos = bencode_get_integer_str(value, out->tos);
+			out->tos = parser->get_int_str(value, out->tos);
 			break;
 		case CSH_LOOKUP("transport protocol"):
 		case CSH_LOOKUP("transport-protocol"):
@@ -1963,20 +1975,20 @@ void call_ng_main_flags(ng_parser_ctx_t *parser_ctx, str *key, bencode_item_t *v
 		case CSH_LOOKUP("trigger end time"):
 		case CSH_LOOKUP("end-trigger-time"):
 		case CSH_LOOKUP("end trigger time"):
-			out->trigger_end_ms = bencode_get_integer_str(value, out->trigger_end_ms);
+			out->trigger_end_ms = parser->get_int_str(value, out->trigger_end_ms);
 			break;
 		case CSH_LOOKUP("trigger-end-digits"):
 		case CSH_LOOKUP("trigger end digits"):
 		case CSH_LOOKUP("end-trigger-digits"):
 		case CSH_LOOKUP("end trigger digits"):
-			out->trigger_end_digits = bencode_get_integer_str(value, out->trigger_end_digits);
+			out->trigger_end_digits = parser->get_int_str(value, out->trigger_end_digits);
 			break;
 
 		case CSH_LOOKUP("via-branch"):
 			out->via_branch = s;
 			break;
 		case CSH_LOOKUP("volume"):
-			out->volume = bencode_get_integer_str(value, out->volume);
+			out->volume = parser->get_int_str(value, out->volume);
 			break;
 		case CSH_LOOKUP("vsc-pause-rec"):
 		case CSH_LOOKUP("VSC-pause-rec"):
