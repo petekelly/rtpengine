@@ -237,6 +237,19 @@ struct sdp_ng_flags {
 		     directional:1;
 };
 
+typedef struct ng_parser ng_parser_t;
+typedef struct ng_parser_ctx ng_parser_ctx_t;
+
+struct ng_parser {
+	void (*dict_iter)(ng_parser_ctx_t *, bencode_item_t *input,
+			void (*callback)(ng_parser_ctx_t *, str *key, bencode_item_t *value));
+};
+struct ng_parser_ctx {
+	const ng_parser_t *parser;
+	sdp_ng_flags *out;
+	enum call_opmode opmode;
+};
+
 
 extern bool trust_address_def;
 extern bool dtls_passive_def;
@@ -294,10 +307,8 @@ void call_interfaces_free(void);
 void call_interfaces_timer(void);
 
 void call_ng_flags_flags(sdp_ng_flags *out, str *s, helper_arg dummy);
-void call_ng_main_flags(sdp_ng_flags *out, str *key, bencode_item_t *value,
-	enum call_opmode opmode);
-void call_ng_codec_flags(sdp_ng_flags *out, str *key, bencode_item_t *value,
-	enum call_opmode opmode);
+void call_ng_main_flags(ng_parser_ctx_t *, str *key, bencode_item_t *value);
+void call_ng_codec_flags(ng_parser_ctx_t *, str *key, bencode_item_t *value);
 void call_ng_direction_flag(sdp_ng_flags *out, bencode_item_t *value);
 
 INLINE struct sdp_manipulations *sdp_manipulations_get_by_id(const sdp_ng_flags *f, enum media_type id) {

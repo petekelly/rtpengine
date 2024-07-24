@@ -52,6 +52,14 @@ static const char* _ng_basic_errors[] = {
     [NG_ERROR_NO_TO_TAG] = "No to-tag in message",
 };
 
+
+static void call_ng_dict_iter(ng_parser_ctx_t *, bencode_item_t *input,
+		void (*callback)(ng_parser_ctx_t *, str *key, bencode_item_t *value));
+static const ng_parser_t ng_parser_native = {
+	.dict_iter = call_ng_dict_iter,
+};
+
+
 INLINE int call_ng_flags_prefix(sdp_ng_flags *out, str *s_ori, const char *prefix,
 		void (*cb)(sdp_ng_flags *, str *, helper_arg), helper_arg);
 static void call_ng_flags_str_ht(sdp_ng_flags *out, str *s, helper_arg);
@@ -1307,9 +1315,8 @@ void call_ng_flags_init(sdp_ng_flags *out, enum call_opmode opmode) {
 	out->frequencies = g_array_new(false, false, sizeof(int));
 }
 
-static void call_ng_dict_iter(sdp_ng_flags *out, bencode_item_t *input,
-		enum call_opmode opmode,
-		void (*callback)(sdp_ng_flags *, str *key, bencode_item_t *value, enum call_opmode _opmode))
+static void call_ng_dict_iter(ng_parser_ctx_t *parser_ctx, bencode_item_t *input,
+		void (*callback)(ng_parser_ctx_t *, str *key, bencode_item_t *value))
 {
 	if (input->type != BENCODE_DICTIONARY)
 		return;
@@ -1324,7 +1331,7 @@ static void call_ng_dict_iter(sdp_ng_flags *out, bencode_item_t *input,
 		if (!bencode_get_str(key, &k))
 			continue;
 
-		callback(out, &k, value, opmode);
+		callback(parser_ctx, &k, value);
 
 	}
 }
@@ -1336,9 +1343,8 @@ void call_ng_direction_flag(sdp_ng_flags *out, bencode_item_t *value)
 	for (bencode_item_t *cit = value->child; cit && diridx < 2; cit = cit->sibling)
 		bencode_get_str(cit, &out->direction[diridx++]);
 }
-void call_ng_codec_flags(sdp_ng_flags *out, str *key, bencode_item_t *value,
-	enum call_opmode opmode)
-{
+void call_ng_codec_flags(ng_parser_ctx_t *ctx, str *key, bencode_item_t *value) {
+	sdp_ng_flags *out = ctx->out;
 	switch (__csh_lookup(key)) {
 		case CSH_LOOKUP("except"):
 			call_ng_flags_str_list(out, value,  call_ng_flags_str_ht, &out->codec_except);
@@ -1442,11 +1448,10 @@ static void call_ng_flags_freqs(sdp_ng_flags *out, bencode_item_t *value) {
 	}
 }
 
-void call_ng_main_flags(sdp_ng_flags *out, str *key, bencode_item_t *value,
-	enum call_opmode opmode)
-{
+void call_ng_main_flags(ng_parser_ctx_t *parser_ctx, str *key, bencode_item_t *value) {
 	str s = STR_NULL;
 	bencode_item_t *it;
+	sdp_ng_flags *out = parser_ctx->out;
 
 	bencode_get_str(value, &s);
 
@@ -1531,7 +1536,7 @@ void call_ng_main_flags(sdp_ng_flags *out, str *key, bencode_item_t *value,
 				out->digit = s.s[0];
 			break;
 		case CSH_LOOKUP("codec"):
-			call_ng_dict_iter(out, value, opmode, call_ng_codec_flags);
+			parser_ctx->parser->dict_iter(parser_ctx, value, call_ng_codec_flags);
 			break;
 		case CSH_LOOKUP("command"):
 			break;
@@ -1875,7 +1880,7 @@ void call_ng_main_flags(sdp_ng_flags *out, str *key, bencode_item_t *value,
 		case CSH_LOOKUP("rtpp-flags"):
 		case CSH_LOOKUP("rtpp_flags"):;
 			/* s - list of rtpp flags */
-			parse_rtpp_flags(&s, value->buffer, opmode, out);
+			parse_rtpp_flags(&s, value->buffer, parser_ctx->opmode, out);
 			break;
 		case CSH_LOOKUP("SDES"):
 		case CSH_LOOKUP("sdes"):
@@ -2022,7 +2027,12 @@ void call_ng_main_flags(sdp_ng_flags *out, str *key, bencode_item_t *value,
 
 static void call_ng_process_flags(sdp_ng_flags *out, bencode_item_t *input, enum call_opmode opmode) {
 	call_ng_flags_init(out, opmode);
-	call_ng_dict_iter(out, input, opmode, call_ng_main_flags);
+	ng_parser_ctx_t parser_ctx = {
+		.parser = &ng_parser_native,
+		.out = out,
+		.opmode = opmode,
+	};
+	call_ng_dict_iter(&parser_ctx, input, call_ng_main_flags);
 }
 
 static void ng_sdp_attr_manipulations_free(struct sdp_manipulations * array[__MT_MAX]) {
