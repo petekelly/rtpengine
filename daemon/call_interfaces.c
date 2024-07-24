@@ -55,12 +55,19 @@ static const char* _ng_basic_errors[] = {
 
 static void call_ng_dict_iter(ng_parser_ctx_t *, bencode_item_t *input,
 		void (*callback)(ng_parser_ctx_t *, str *key, bencode_item_t *value));
+static void call_ng_list_iter(ng_parser_ctx_t *ctx, bencode_item_t *list,
+		void (*str_callback)(ng_parser_ctx_t *, str *key, helper_arg),
+		void (*item_callback)(ng_parser_ctx_t *, bencode_item_t *, helper_arg),
+		helper_arg arg);
 static bool call_ng_get_str(bencode_item_t *arg, str *out);
 static long long call_ng_get_int_str(bencode_item_t *arg, long long def);
+static bool call_ng_is_list(bencode_item_t *arg);
 static const ng_parser_t ng_parser_native = {
 	.dict_iter = call_ng_dict_iter,
+	.list_iter = call_ng_list_iter,
 	.get_str = call_ng_get_str,
 	.get_int_str = call_ng_get_int_str,
+	.is_list = call_ng_is_list,
 };
 
 
@@ -708,17 +715,17 @@ INLINE void ng_sdp_attr_manipulations(ng_parser_ctx_t *ctx, bencode_item_t *valu
 			switch (__csh_lookup(&command_type)) {
 
 				case CSH_LOOKUP("substitute"):
-					call_ng_flags_list(NULL, command_value, call_ng_flags_str_pair_ht, call_ng_flags_item_pair_ht,
+					call_ng_flags_list(ctx, command_value, call_ng_flags_str_pair_ht, call_ng_flags_item_pair_ht,
 							&sm->subst_commands);
 					break;
 
 				case CSH_LOOKUP("add"):
-					call_ng_flags_str_list(NULL, command_value, call_ng_flags_esc_str_list, &sm->add_commands);
+					call_ng_flags_str_list(ctx, command_value, call_ng_flags_esc_str_list, &sm->add_commands);
 					break;
 
 				/* CMD_REM commands */
 				case CSH_LOOKUP("remove"):
-					call_ng_flags_str_list(NULL, command_value, call_ng_flags_str_ht, &sm->rem_commands);
+					call_ng_flags_str_list(ctx, command_value, call_ng_flags_str_ht, &sm->rem_commands);
 					break;
 
 				default:
@@ -813,9 +820,10 @@ static void call_ng_flags_list(ng_parser_ctx_t *ctx, bencode_item_t *list,
 		void (*item_callback)(ng_parser_ctx_t *, bencode_item_t *, helper_arg),
 		helper_arg arg)
 {
+	const ng_parser_t *parser = ctx->parser;
 	str s;
-	if (list->type != BENCODE_LIST) {
-		if (bencode_get_str(list, &s)) {
+	if (!parser->is_list(list)) {
+		if (parser->get_str(list, &s)) {
 			str token;
 			while (str_token_sep(&token, &s, ','))
 				str_callback(ctx, &token, arg);
@@ -824,14 +832,7 @@ static void call_ng_flags_list(ng_parser_ctx_t *ctx, bencode_item_t *list,
 			ilog(LOG_DEBUG, "Ignoring non-list non-string value");
 		return;
 	}
-	for (bencode_item_t *it = list->child; it; it = it->sibling) {
-		if (bencode_get_str(it, &s))
-			str_callback(ctx, &s, arg);
-		else if (item_callback)
-			item_callback(ctx, it, arg);
-		else
-			ilog(LOG_DEBUG, "Ignoring non-string value in list");
-	}
+	parser->list_iter(ctx, list, str_callback, item_callback, arg);
 }
 static void call_ng_flags_str_list(ng_parser_ctx_t *ctx, bencode_item_t *list,
 		void (*callback)(ng_parser_ctx_t *ctx, str *, helper_arg), helper_arg arg)
@@ -1350,6 +1351,21 @@ static void call_ng_dict_iter(ng_parser_ctx_t *parser_ctx, bencode_item_t *input
 
 	}
 }
+static void call_ng_list_iter(ng_parser_ctx_t *ctx, bencode_item_t *list,
+		void (*str_callback)(ng_parser_ctx_t *, str *key, helper_arg),
+		void (*item_callback)(ng_parser_ctx_t *, bencode_item_t *, helper_arg),
+		helper_arg arg)
+{
+	str s;
+	for (bencode_item_t *it = list->child; it; it = it->sibling) {
+		if (bencode_get_str(it, &s))
+			str_callback(ctx, &s, arg);
+		else if (item_callback)
+			item_callback(ctx, it, arg);
+		else
+			ilog(LOG_DEBUG, "Ignoring non-string value in list");
+	}
+}
 void call_ng_direction_flag(sdp_ng_flags *out, bencode_item_t *value)
 {
 	if (value->type != BENCODE_LIST)
@@ -1468,6 +1484,9 @@ static bool call_ng_get_str(bencode_item_t *arg, str *out) {
 }
 static long long call_ng_get_int_str(bencode_item_t *arg, long long def) {
 	return bencode_get_integer_str(arg, def);
+}
+static bool call_ng_is_list(bencode_item_t *arg) {
+	return arg->type == BENCODE_LIST;
 }
 
 void call_ng_main_flags(ng_parser_ctx_t *parser_ctx, str *key, bencode_item_t *value) {

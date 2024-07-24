@@ -24,12 +24,19 @@ static const char *transports[] = {
 
 static void rtpp_dict_iter(ng_parser_ctx_t *, bencode_item_t *input,
 		void (*callback)(ng_parser_ctx_t *, str *key, bencode_item_t *value));
+static void rtpp_list_iter(ng_parser_ctx_t *ctx, bencode_item_t *list,
+		void (*str_callback)(ng_parser_ctx_t *, str *key, helper_arg),
+		void (*item_callback)(ng_parser_ctx_t *, bencode_item_t *, helper_arg),
+		helper_arg arg);
 static bool rtpp_get_str(bencode_item_t *arg, str *out);
 static long long rtpp_get_int_str(bencode_item_t *arg, long long def);
+static bool rtpp_is_list(bencode_item_t *arg);
 static const ng_parser_t ng_parser_rtpp = {
 	.dict_iter = rtpp_dict_iter,
+	.list_iter = rtpp_list_iter,
 	.get_str = rtpp_get_str,
 	.get_int_str = rtpp_get_int_str,
+	.is_list = rtpp_is_list,
 };
 
 /**
@@ -204,11 +211,21 @@ static void rtpp_dict_iter(ng_parser_ctx_t *parser_ctx, bencode_item_t *input,
 {
 	ilog(LOG_ERR, "rtpp_flags dict iteration not yet supported");
 }
+static void rtpp_list_iter(ng_parser_ctx_t *ctx, bencode_item_t *list,
+		void (*str_callback)(ng_parser_ctx_t *, str *key, helper_arg),
+		void (*item_callback)(ng_parser_ctx_t *, bencode_item_t *, helper_arg),
+		helper_arg arg)
+{
+	ilog(LOG_ERR, "rtpp_flags list iteration not yet supported");
+}
 static bool rtpp_get_str(bencode_item_t *arg, str *out) {
 	return bencode_get_str(arg, out) != NULL;
 }
 static long long rtpp_get_int_str(bencode_item_t *arg, long long def) {
 	return bencode_get_integer_str(arg, def);
+}
+static bool rtpp_is_list(bencode_item_t *arg) {
+	return false;
 }
 
 /**
