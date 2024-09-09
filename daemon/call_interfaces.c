@@ -1799,7 +1799,8 @@ void call_ng_main_flags(sdp_ng_flags *out, str *key, bencode_item_t *value,
 			//out->media_rec_slot_answer = parser->get_int_str(value, out->media_rec_slot_answer);
 		break;
 		case CSH_LOOKUP("recording-media-slots"):
-			out->media_rec_slots = parser->get_int_str(value, out->media_rec_slots);
+			out->media_rec_slots = bencode_get_integer_str(value, out->media_rec_slots);
+			//out->media_rec_slots = parser->get_int_str(value, out->media_rec_slots);
 		break;
 		case CSH_LOOKUP("passthrough"):
 		case CSH_LOOKUP("passthru"):
