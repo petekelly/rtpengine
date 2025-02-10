@@ -1,3 +1,176 @@
+ngcp-rtpengine (12.5.1.23+0~mr12.5.1.23) unstable; urgency=medium
+
+  [ Donat Zenichev ]
+  * [f4860a0] MT#62098 Support session level connection replacement in mr12.5+
+
+ -- Sipwise Jenkins Builder <jenkins@sipwise.com>  Thu, 06 Feb 2025 14:54:42 +0100
+
+ngcp-rtpengine (12.5.1.22+0~mr12.5.1.22) unstable; urgency=medium
+
+  [ Richard Fuchs ]
+  * [e742dbf] MT#55283 fix str_str return type
+  * [9a93e0e] MT#55283 add format_cmp_g729
+  * [22b142d] MT#55283 ignore a=fmtp for G.722
+  * [c6177cc] MT#55283 don't accept incompatible codecs
+  * [fb04ea7] MT#55283 add tests to reject incompatible codecs
+
+ -- Sipwise Jenkins Builder <jenkins@sipwise.com>  Mon, 20 Jan 2025 17:35:44 +0100
+
+ngcp-rtpengine (12.5.1.21+0~mr12.5.1.21) unstable; urgency=medium
+
+  [ Richard Fuchs ]
+  * [905a197] MT#55283 fork to background before init HTTP/WS
+  * [9669665] MT#55283 el: don't fork to background
+
+ -- Sipwise Jenkins Builder <jenkins@sipwise.com>  Thu, 16 Jan 2025 18:38:12 +0100
+
+ngcp-rtpengine (12.5.1.20+0~mr12.5.1.20) unstable; urgency=medium
+
+  [ Richard Fuchs ]
+  * [4c05803] MT#55283 add original-sendrecv test
+  * [9049e50] MT#55283 fix kernel compilation for >= 6.13
+
+ -- Sipwise Jenkins Builder <jenkins@sipwise.com>  Wed, 15 Jan 2025 18:49:24 +0100
+
+ngcp-rtpengine (12.5.1.19+0~mr12.5.1.19) unstable; urgency=medium
+
+  [ Richard Fuchs ]
+  * [d737360] MT#55283 fix possible NULL dereference
+  * [4f011a8] MT#55283 silence compiler warning
+  * [1bf22a0] MT#61822 fix possible NULL dereference
+  * [e493452] MT#61822 fix missing duration scaling
+
+  [ S-P Chan ]
+  * [3a2ea42] MT#55283 Workaround for RPM packaging EL8/GCC 8.5
+
+  [ Orgad Shaneh ]
+  * [a3ff45d] MT#55283 Prevent warning logs when recording-method is pcap
+
+ -- Sipwise Jenkins Builder <jenkins@sipwise.com>  Fri, 10 Jan 2025 17:13:53 +0100
+
+ngcp-rtpengine (12.5.1.18+0~mr12.5.1.18) unstable; urgency=medium
+
+  [ Richard Fuchs ]
+  * [6875fb3] MT#55283 remove debugging remnants
+
+ -- Sipwise Jenkins Builder <jenkins@sipwise.com>  Mon, 09 Dec 2024 16:38:30 +0100
+
+ngcp-rtpengine (12.5.1.17+0~mr12.5.1.17) unstable; urgency=medium
+
+  [ Richard Fuchs ]
+  * [67aefce] MT#61371 replace code with helper function
+  * [42139ac] MT#61371 remove one level of indentation
+  * [0109b1e] MT#55283 remove remnant
+  * [90ef882] MT#61372 add alternative spellings
+  * [97a9d4f] MT#61352 free options at the end
+  * [6b1c0d9] MT#61352 strip leading spaces in interfaces
+  * [6c567bd] MT#61352 fix mem leak in config_load_ext
+  * [415565e] MT#61371 prevent A <> A dialogue associations
+  * [793d9d2] MT#55283 fix ffmpeg deprecation warning
+  * [78beb92] MT#55283 fix typo
+
+  [ Andrew Solovjov ]
+  * [97df3c7] MT#55283 Fix EL build errors
+
+ -- Sipwise Jenkins Builder <jenkins@sipwise.com>  Wed, 04 Dec 2024 13:00:34 +0100
+
+ngcp-rtpengine (12.5.1.16+0~mr12.5.1.16) unstable; urgency=medium
+
+  [ Richard Fuchs ]
+  * [95f6cde] MT#55283 fix wrong string length being used
+
+ -- Sipwise Jenkins Builder <jenkins@sipwise.com>  Wed, 20 Nov 2024 15:24:10 +0100
+
+ngcp-rtpengine (12.5.1.15+0~mr12.5.1.15) unstable; urgency=medium
+
+  [ Richard Fuchs ]
+  * [5ed335d] MT#55283 always use full-struct initialisation.
+    Thanks to Alexandru Pirvulescu <alex@tcnbroadcasting.com>
+  * [7fa0b5e] MT#55283 compile fix for CentOS 9
+
+  [ Peter Pulham ]
+  * [6029071] MT#55283 media_socket.c: check for NULL payload_types passed to kernelize_one
+
+ -- Sipwise Jenkins Builder <jenkins@sipwise.com>  Fri, 01 Nov 2024 15:34:14 +0100
+
+ngcp-rtpengine (12.5.1.14+0~mr12.5.1.14) unstable; urgency=medium
+
+  [ Alexandru Pirvulescu ]
+  * [54568f5] MT#55283 Ensure copy pointer don't leak memory
+
+  [ Donat Zenichev ]
+  * [70325a4] MT#56128 Re-move misleading log line
+
+ -- Sipwise Jenkins Builder <jenkins@sipwise.com>  Tue, 22 Oct 2024 12:13:54 +0200
+
+ngcp-rtpengine (12.5.1.13+0~mr12.5.1.13) unstable; urgency=medium
+
+  [ Richard Fuchs ]
+  * [cfb9342] MT#55283 fix compilation error for pcre2 >= 10.43
+  * [d3b9441] MT#61263 fix `delete` stats reporting
+  * [4001d03] MT#61263 add missing log context
+
+ -- Sipwise Jenkins Builder <jenkins@sipwise.com>  Thu, 17 Oct 2024 17:57:53 +0200
+
+ngcp-rtpengine (12.5.1.12+0~mr12.5.1.12) unstable; urgency=medium
+
+  [ Richard Fuchs ]
+  * [5cafeb8] MT#55283 fix websocket shutdown mem leak
+  * [d0ed54e] MT#55283 fix session reference booboo
+  * [e95d515] MT#55283 switch to BIO_set_callback_arg
+  * [0e13387] MT#55283 unify types used for sequence numbers
+  * [da6b6ae] MT#55283 fix ext_seq math booboo
+
+ -- Sipwise Jenkins Builder <jenkins@sipwise.com>  Wed, 09 Oct 2024 18:53:56 +0200
+
+ngcp-rtpengine (12.5.1.11+0~mr12.5.1.11) unstable; urgency=medium
+
+  [ Donat Zenichev ]
+  * [028c62e] MT#61140 call_delete_ng: add normal parsing
+  * [ea6fdcb] MT#61140 Fix Coverity Scan defect (to_tag_flag)
+
+ -- Sipwise Jenkins Builder <jenkins@sipwise.com>  Wed, 02 Oct 2024 14:02:20 +0200
+
+ngcp-rtpengine (12.5.1.10+0~mr12.5.1.10) unstable; urgency=medium
+
+  [ Richard Fuchs ]
+  * [8fb6f7c] MT#55283 use #ifdef instead of #if
+  * [db3ace0] MT#55283 catch changes in a=mid
+  * [9cb5b64] MT#55283 rekernelize after DTLS connect
+
+ -- Sipwise Jenkins Builder <jenkins@sipwise.com>  Thu, 26 Sep 2024 16:45:26 +0200
+
+ngcp-rtpengine (12.5.1.9+0~mr12.5.1.9) unstable; urgency=medium
+
+  [ Richard Fuchs ]
+  * [ab6af8e] MT#55283 fix possible null dereference
+
+ -- Sipwise Jenkins Builder <jenkins@sipwise.com>  Tue, 24 Sep 2024 16:34:06 +0200
+
+ngcp-rtpengine (12.5.1.8+0~mr12.5.1.8) unstable; urgency=medium
+
+  [ Richard Fuchs ]
+  * [f1d1662] MT#55283 allow rejection of first m=
+
+ -- Sipwise Jenkins Builder <jenkins@sipwise.com>  Mon, 23 Sep 2024 16:54:26 +0200
+
+ngcp-rtpengine (12.5.1.7+0~mr12.5.1.7) unstable; urgency=medium
+
+  [ Richard Fuchs ]
+  * [86e3bff] MT#61090 replace fixture with DFSG compatible one
+  * [c21f249] MT#55283 add PIE build flags
+  * [741f6ac] MT#55283 add -latomic
+  * [43f15cd] MT#55283 fix compile warning
+
+ -- Sipwise Jenkins Builder <jenkins@sipwise.com>  Tue, 17 Sep 2024 23:21:02 +0200
+
+ngcp-rtpengine (12.5.1.6+0~mr12.5.1.6) unstable; urgency=medium
+
+  [ Richard Fuchs ]
+  * [b685584] MT#55283 remove unsupported codecs w/ audio player
+
+ -- Sipwise Jenkins Builder <jenkins@sipwise.com>  Mon, 16 Sep 2024 15:07:45 +0200
+
 ngcp-rtpengine (12.5.1.5+0~mr12.5.1.5) unstable; urgency=medium
 
   [ Richard Fuchs ]

@@ -130,7 +130,7 @@ static void media_player_shutdown(struct media_player *mp) {
 		mp->ssrc_out->parent->seq_diff -= num;
 	}
 
-	if (mp->opts.block_egress)
+	if (mp->opts.block_egress && mp->media)
 		MEDIA_CLEAR(mp->media, BLOCK_EGRESS);
 
 	mp->media = NULL;
@@ -327,6 +327,8 @@ static bool __send_timer_send_1(struct rtp_header *rh, struct packet_stream *sin
 }
 
 static void __send_timer_send_common(struct send_timer *st, struct codec_packet *cp) {
+	log_info_stream_fd(st->sink->selected_sfd);
+
 	if (!__send_timer_send_1(cp->rtp, st->sink, cp))
 		goto out;
 
@@ -352,6 +354,7 @@ static void __send_timer_send_common(struct send_timer *st, struct codec_packet 
 
 out:
 	codec_packet_free(cp);
+	log_info_pop();
 }
 
 static void send_timer_send_lock(struct send_timer *st, struct codec_packet *cp) {
@@ -747,12 +750,13 @@ static void packet_encoded_cache(AVPacket *pkt, struct codec_ssrc_handler *ch, s
 
 	struct media_player_cache_packet *ep = g_slice_alloc0(sizeof(*ep));
 
+	long duration = fraction_divl(pkt->duration, cr_fact);
 	*ep = (__typeof__(*ep)) {
 		.buf = buf,
 		.s = *s,
 		.pts = pkt->pts,
-		.duration_ts = pkt->duration,
-		.duration = (long long) pkt->duration * 1000000LL
+		.duration_ts = duration,
+		.duration = (long long) duration * 1000000LL
 			/ entry->coder.handler->dest_pt.clock_rate,
 	};
 

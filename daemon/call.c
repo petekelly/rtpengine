@@ -564,7 +564,6 @@ enum thread_looper_action call_timer(void) {
 
 	return TLA_CONTINUE;
 }
-#undef DS
 
 
 int call_init(void) {
@@ -667,8 +666,13 @@ static struct call_media *__get_media(struct call_monologue *ml, const struct st
 		// in this case, the media sections can be out of order and the media ID
 		// string is used to determine which media section to operate on.
 		med = g_hash_table_lookup(ml->media_ids, &sp->media_id);
-		if (med)
-			return med;
+		if (med) {
+			if (med->type_id == sp->type_id)
+				return med;
+			ilogs(ice, LOG_WARN, "Ignoring media ID '" STR_FORMAT "' as media type doesn't match. "
+					"Was media ID changed?", STR_FMT(&sp->media_id));
+			med = NULL;
+		}
 		if (flags->trickle_ice)
 			ilogs(ice, LOG_ERR, "Received trickle ICE SDP fragment with unknown media ID '"
 					STR_FORMAT "'",
@@ -1097,8 +1101,10 @@ enum call_stream_state call_stream_state_machine(struct packet_stream *ps) {
 		mutex_lock(&ps->in_lock);
 		struct dtls_connection *d = dtls_ptr(ps->selected_sfd);
 		if (d && d->init && !d->connected) {
-			dtls(ps->selected_sfd, NULL, NULL);
+			int dret = dtls(ps->selected_sfd, NULL, NULL);
 			mutex_unlock(&ps->in_lock);
+			if (dret == 1)
+				call_media_unkernelize(media, "DTLS connected");
 			return CSS_DTLS;
 		}
 		mutex_unlock(&ps->in_lock);
@@ -4516,18 +4522,7 @@ static int call_get_monologue_new(struct call_monologue *monologues[2], call_t *
 
 	__C_DBG("found existing monologue");
 	/* unkernelize existing monologue medias, which are subscribed to something */
-	__monologue_unconfirm(ret, "signalling on existing monologue");
-	for (int i = 0; i < ret->medias->len; i++)
-	{
-		struct call_media * media = ret->medias->pdata[i];
-		if (!media)
-			continue;
-
-		for (__auto_type subcription = media->media_subscriptions.head; subcription; subcription = subcription->next) {
-			struct media_subscription * ms = subcription->data;
-			__media_unconfirm(ms->media, "signalling on existing media");
-		}
-	}
+	dialogue_unconfirm(ret, "signalling on existing monologue");
 
 	/* If to-tag is present, retrieve it.
 	 * Create a new monologue for the other side, if the monologue with such to-tag not found.
@@ -4636,34 +4631,35 @@ static int call_get_dialogue(struct call_monologue *monologues[2], call_t *call,
 		}
 		/* it seems ft hasn't seen tt before */
 		goto tag_setup;
+	}
 
 	/* try to determine the monologue from the viabranch,
 	 * or using the top most tt's subscription, if there is one.
 	 * Otherwise just create a brand-new one.
 	 */
-	} else {
-		/* viabranch */
-		if (viabranch)
-			ft = t_hash_table_lookup(call->viabranches, viabranch);
-		/* top most subscription of tt */
-		if (!ft) {
-			struct call_media *media = tt->medias->pdata[0];
-			if (media && media->media_subscriptions.head) {
-				struct media_subscription * ms = media->media_subscriptions.head->data;
-				if (ms->monologue)
-					ft = ms->monologue;
-			}
+	if (viabranch)
+		ft = t_hash_table_lookup(call->viabranches, viabranch);
+	/* top most subscription of tt */
+	if (!ft) {
+		struct call_media *media = tt->medias->len ? tt->medias->pdata[0] : NULL;
+		if (media && media->media_subscriptions.head) {
+			struct media_subscription * ms = media->media_subscriptions.head->data;
+			if (ms->monologue)
+				ft = ms->monologue;
 		}
-		/* otherwise create a brand-new one.
-		 * The lookup of the offer monologue from the answer monologue is only valid,
-		 * if the offer monologue belongs to an unanswered call (empty tag),
-		 * hence `ft->tag` has to be empty at this stage.
-		 */
-		if (!ft || ft->tag.s)
-			ft = __monologue_create(call);
 	}
+	/* otherwise create a brand-new one.
+	 * The lookup of the offer monologue from the answer monologue is only valid,
+	 * if the offer monologue belongs to an unanswered call (empty tag),
+	 * hence `ft->tag` has to be empty at this stage.
+	 */
+	if (!ft || ft->tag.s)
+		ft = __monologue_create(call);
 
 tag_setup:
+	if (ft == tt)
+		return -1; // it's a hard error to have a monologue talking to itself
+
 	/* the fromtag monologue may be newly created, or half-complete from the totag, or
 	 * derived from the viabranch. */
 	if (!ft->tag.s || str_cmp_str(&ft->tag, fromtag))
@@ -4816,9 +4812,6 @@ int call_delete_branch(call_t *c, const str *branch,
 do_delete:
 	c->destroyed = rtpe_now;
 
-	if (output)
-		ng_call_stats(c, fromtag, totag, output, NULL);
-
 	/* stop media player and all medias of ml.
 	 * same for media subscribers */
 	monologue_stop(ml, true);
@@ -4836,9 +4829,15 @@ do_delete:
 	if (!del_stop)
 		goto del_all;
 
+	if (output)
+		ng_call_stats(c, fromtag, totag, output, NULL);
+
 	goto success_unlock;
 
 del_all:
+	if (output)
+		ng_call_stats(c, fromtag, totag, output, NULL);
+
 	for (__auto_type i = c->monologues.head; i; i = i->next) {
 		ml = i->data;
 		monologue_stop(ml, false);

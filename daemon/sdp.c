@@ -301,6 +301,7 @@ const str rtpe_instance_id = STR_CONST_INIT(__id_buf);
 static void attr_free(struct sdp_attribute *p);
 static void attr_insert(struct sdp_attributes *attrs, struct sdp_attribute *attr);
 INLINE void chopper_append_c(struct sdp_chopper *c, const char *s);
+INLINE void chopper_append_str(struct sdp_chopper *c, const str *s);
 
 /**
  * Checks whether an attribute removal request exists for a given session level.
@@ -316,13 +317,13 @@ static bool sdp_manipulate_remove(struct sdp_manipulations * sdp_manipulations, 
 		return false;
 
 	str_case_ht ht = sdp_manipulations->rem_commands;
-	if (t_hash_table_is_set(ht) && t_hash_table_lookup(ht, attr_name))
-		return true;
+	if (t_hash_table_is_set(ht) && t_hash_table_lookup(ht, attr_name)) {
+		ilog(LOG_DEBUG, "Cannot insert: '" STR_FORMAT "' because prevented by SDP manipulations (remove)",
+				STR_FMT(attr_name));
+		return true; /* means remove */
+	}
 
-	ilog(LOG_DEBUG, "Cannot insert: '" STR_FORMAT "' because prevented by SDP manipulations (remove)",
-			STR_FMT(attr_name));
-
-	return false;
+	return false; /* means don't remove */
 }
 
 /**
@@ -366,7 +367,7 @@ static void sdp_manipulations_add(struct sdp_chopper *chop,
 		str * attr_value = l->data;
 
 		chopper_append_c(chop, "a=");
-		chopper_append_c(chop, attr_value->s);
+		chopper_append_str(chop, attr_value);
 		chopper_append_c(chop, "\r\n");
 	}
 }
@@ -3238,7 +3239,6 @@ int sdp_replace(struct sdp_chopper *chop, sdp_sessions_q *sessions,
 	struct sdp_session *session;
 	struct sdp_session *first_session = NULL;
 	struct sdp_media *sdp_media;
-	int sess_conn;
 	struct call_media *call_media;
 	struct packet_stream *ps;
 	const char *err = NULL;
@@ -3263,7 +3263,9 @@ int sdp_replace(struct sdp_chopper *chop, sdp_sessions_q *sessions,
 			if (!call_media->streams.head)
 				continue;
 			ps = call_media->streams.head->data;
-			break;
+			if (ps->selected_sfd)
+				break;
+			ps = NULL;
 		}
 
 		err = "no usable session media stream";
@@ -3327,19 +3329,11 @@ int sdp_replace(struct sdp_chopper *chop, sdp_sessions_q *sessions,
 				goto error;
 		}
 
-		sess_conn = 0;
-		for (__auto_type k = session->media_streams.head; k; k = k->next) {
-			sdp_media = k->data;
-			if (!sdp_media->connection.parsed) {
-				sess_conn = 1;
-				break;
-			}
-		}
-
 		bool media_has_ice = MEDIA_ISSET(call_media, ICE);
 		bool keep_zero_address = ! media_has_ice;
 
-		if (session->connection.parsed && sess_conn &&
+		/* inconditionally replace session connection if present */
+		if (session->connection.parsed &&
 		    flags->ice_option != ICE_FORCE_RELAY) {
 			err = "failed to replace network address";
 			if (replace_network_address(chop, &session->connection.address, ps, flags,

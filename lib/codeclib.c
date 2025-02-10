@@ -366,6 +366,7 @@ static const dtx_method_t dtx_method_evs = {
 
 #ifdef HAVE_BCG729
 static packetizer_f packetizer_g729; // aggregate some frames into packets
+static format_cmp_f format_cmp_g729;
 
 static void bcg729_def_init(struct codec_def_s *);
 static const char *bcg729_decoder_init(decoder_t *, const str *);
@@ -447,6 +448,7 @@ static struct codec_def_s __codec_defs[] = {
 		.default_clockrate = 8000,
 		.default_channels = 1,
 		.default_ptime = 20,
+		.format_cmp = format_cmp_ignore,
 		.packetizer = packetizer_samplestream,
 		.bits_per_sample = 4,
 		.media_type = MT_AUDIO,
@@ -513,6 +515,7 @@ static struct codec_def_s __codec_defs[] = {
 		.default_ptime = 20,
 		.minimum_ptime = 20,
 		.default_fmtp = "annexb=no",
+		.format_cmp = format_cmp_g729,
 		.packetizer = packetizer_g729,
 		.bits_per_sample = 1, // 10 ms frame has 80 samples and encodes as (max) 10 bytes = 80 bits
 		.media_type = MT_AUDIO,
@@ -530,6 +533,7 @@ static struct codec_def_s __codec_defs[] = {
 		.default_channels = 1,
 		.default_ptime = 20,
 		.minimum_ptime = 20,
+		.format_cmp = format_cmp_g729,
 		.packetizer = packetizer_g729,
 		.bits_per_sample = 1, // 10 ms frame has 80 samples and encodes as (max) 10 bytes = 80 bits
 		.media_type = MT_AUDIO,
@@ -897,7 +901,13 @@ static const char *avc_decoder_init(decoder_t *dec, const str *extra_opts) {
 		return "failed to open codec context";
 	}
 
-	for (const enum AVSampleFormat *sfmt = codec->sample_fmts; sfmt && *sfmt != -1; sfmt++)
+#if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(61, 19, 0)
+	avcodec_get_supported_config(dec->avc.avcctx, codec, AV_CODEC_CONFIG_SAMPLE_FORMAT, 0, (const void **) &dec->avc.sample_fmts, NULL);
+#else
+	dec->avc.sample_fmts = codec->sample_fmts;
+#endif
+
+	for (const enum AVSampleFormat *sfmt = dec->avc.sample_fmts; sfmt && *sfmt != -1; sfmt++)
 		cdbg("supported sample format for input codec %s: %s",
 				codec->name, av_get_sample_fmt_name(*sfmt));
 
@@ -1756,9 +1766,12 @@ out:
 	g_tree_steal(ps->packets, GINT_TO_POINTER(packet->seq));
 	ps->seq = (packet->seq + 1) & 0xffff;
 
-	if (packet->seq < ps->ext_seq)
+	unsigned int ext_seq = ps->roc << 16 | packet->seq;
+	while (ext_seq < ps->ext_seq) {
 		ps->roc++;
-	ps->ext_seq = ps->roc << 16 | packet->seq;
+		ext_seq += 0x10000;
+	}
+	ps->ext_seq = ext_seq;
 
 	return packet;
 }
@@ -1836,15 +1849,21 @@ static const char *avc_encoder_init(encoder_t *enc, const str *extra_opts) {
 
 	enc->actual_format = enc->requested_format;
 
+#if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(61, 19, 0)
+	avcodec_get_supported_config(enc->avc.avcctx, enc->avc.codec, AV_CODEC_CONFIG_SAMPLE_FORMAT, 0, (const void **) &enc->avc.sample_fmts, NULL);
+#else
+	enc->avc.sample_fmts = enc->avc.codec->sample_fmts;
+#endif
+
 	enc->actual_format.format = -1;
-	for (const enum AVSampleFormat *sfmt = enc->avc.codec->sample_fmts; sfmt && *sfmt != -1; sfmt++) {
+	for (const enum AVSampleFormat *sfmt = enc->avc.sample_fmts; sfmt && *sfmt != -1; sfmt++) {
 		cdbg("supported sample format for output codec %s: %s",
 				enc->avc.codec->name, av_get_sample_fmt_name(*sfmt));
 		if (*sfmt == enc->requested_format.format)
 			enc->actual_format.format = *sfmt;
 	}
-	if (enc->actual_format.format == -1 && enc->avc.codec->sample_fmts)
-		enc->actual_format.format = enc->avc.codec->sample_fmts[0];
+	if (enc->actual_format.format == -1 && enc->avc.sample_fmts)
+		enc->actual_format.format = enc->avc.sample_fmts[0];
 	cdbg("using output sample format %s for codec %s",
 			av_get_sample_fmt_name(enc->actual_format.format), enc->avc.codec->name);
 
@@ -3587,6 +3606,21 @@ static int packetizer_g729(AVPacket *pkt, GString *buf, str *input_output, encod
 		return -1; // got nothing
 	input_output->len = output.s - input_output->s;
 	return buf->len >= 2 ? 1 : 0;
+}
+
+static int format_cmp_g729(const struct rtp_payload_type *a, const struct rtp_payload_type *b) {
+	// shortcut the most common case:
+	if (!str_cmp_str(&a->format_parameters, &b->format_parameters))
+		return 0;
+	// incompatible is if one side uses annex B but the other one doesn't
+	if (str_str(&a->format_parameters, "annexb=yes") != -1
+			&& str_str(&b->format_parameters, "annexb=yes") == -1)
+		return -1;
+	if (str_str(&a->format_parameters, "annexb=yes") == -1
+			&& str_str(&b->format_parameters, "annexb=yes") != -1)
+		return -1;
+	// everything else is compatible
+	return 0;
 }
 #endif
 

@@ -275,6 +275,9 @@ static int if_addr_parse(intf_config_q *q, char *s, struct ifaddrs *ifas) {
 	GQueue addrs = G_QUEUE_INIT;
 	struct intf_config *ifa;
 
+	while (*s == ' ')
+		s++;
+
 	/* name */
 	c = strpbrk(s, "/=");
 	if (c) {
@@ -955,6 +958,8 @@ static void options(int *argc, char ***argv) {
 		However, this does not preclude link layers with an MTU smaller than this minimum MTU from conveying IP data. Internet IPv4 path MTU is 68 bytes.*/
 		die("Invalid --dtls-mtu (%i)", rtpe_config.dtls_mtu);
 
+	rtpe_config.dtls_mtu -= DTLS_MTU_OVERHEAD;
+
 	if (rtpe_config.jb_length < 0)
 		die("Invalid negative jitter buffer size");
 
@@ -1398,11 +1403,11 @@ static void create_everything(void) {
 			rtpe_redis_write = rtpe_redis;
 	}
 
-	if (websocket_init())
-		die("Failed to init websocket listener");
-
 	daemonize();
 	wpidfile();
+
+	if (websocket_init())
+		die("Failed to init websocket listener");
 
 	homer_sender_init(&rtpe_config.homer_ep, rtpe_config.homer_protocol, rtpe_config.homer_id);
 
@@ -1604,7 +1609,6 @@ int main(int argc, char **argv) {
 	redis_close(rtpe_redis_notify);
 
 	free_prefix();
-	options_free();
 	log_free();
 	janus_free();
 
@@ -1628,6 +1632,7 @@ int main(int argc, char **argv) {
 #endif
 	bufferpool_destroy(shm_bufferpool);
 	kernel_shutdown_table();
+	options_free();
 	bufferpool_cleanup();
 
 	return 0;

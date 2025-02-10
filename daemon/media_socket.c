@@ -1521,7 +1521,7 @@ static const char *kernelize_one(struct rtpengine_target_info *reti, GQueue *out
 		}
 	}
 
-	if (reti->rtp && sinks && sinks->length) {
+	if (reti->rtp && sinks && sinks->length && payload_types) {
 		GList *l;
 		struct rtp_stats *rs;
 
@@ -1798,7 +1798,7 @@ void __unkernelize(struct packet_stream *p, const char *reason) {
 		ilog(LOG_INFO, "Removing media stream from kernel: local %s (%s)",
 				endpoint_print_buf(&p->selected_sfd->socket.local),
 				reason);
-		struct rtpengine_command_del_target cmd;
+		struct rtpengine_command_del_target cmd = {0};
 		__re_address_translate_ep(&cmd.local, &p->selected_sfd->socket.local);
 		kernel_del_stream(&cmd);
 	}
@@ -2035,6 +2035,11 @@ static int media_demux_protocols(struct packet_handler_ctx *phc) {
 
 		mutex_lock(&phc->mp.stream->in_lock);
 		int ret = dtls(phc->mp.sfd, &phc->s, &phc->mp.fsin);
+		if (ret == 1) {
+			phc->unkernelize = "DTLS connected";
+			phc->unkernelize_subscriptions = true;
+			ret = 0;
+		}
 		mutex_unlock(&phc->mp.stream->in_lock);
 		if (!ret)
 			return 0;
@@ -2689,10 +2694,10 @@ static int stream_packet(struct packet_handler_ctx *phc) {
 		atomic64_inc_na(&phc->mp.ssrc_in->stats->packets);
 		atomic64_add_na(&phc->mp.ssrc_in->stats->bytes, phc->s.len);
 		// no real sequencing, so this is rudimentary
-		uint64_t old_seq = atomic_get_na(&phc->mp.ssrc_in->stats->ext_seq);
-		uint64_t new_seq = ntohs(phc->mp.rtp->seq_num) | (old_seq & 0xffff0000UL);
+		unsigned int old_seq = atomic_get_na(&phc->mp.ssrc_in->stats->ext_seq);
+		unsigned int new_seq = ntohs(phc->mp.rtp->seq_num) | (old_seq & 0xffff0000UL);
 		// XXX combine this with similar code elsewhere
-		long seq_diff = new_seq - old_seq;
+		int seq_diff = new_seq - old_seq;
 		while (seq_diff < -60000) {
 			new_seq += 0x10000;
 			seq_diff += 0x10000;

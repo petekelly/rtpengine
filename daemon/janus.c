@@ -28,7 +28,7 @@ struct janus_session { // "login" session
 	janus_handles_set handles; // handle ID -> 0x1. handle ID owned by janus_handles
 };
 
-TYPED_GHASHTABLE(janus_sessions_ht, uint64_t, struct janus_session, int64_hash, int64_eq, NULL, NULL)
+TYPED_GHASHTABLE(janus_sessions_ht, uint64_t, struct janus_session, int64_hash, int64_eq, NULL, __obj_put)
 
 
 struct janus_handle { // corresponds to a conference participant
@@ -1462,8 +1462,11 @@ static const char *janus_destroy(struct websocket_message *wm, JsonReader *reade
 
 	struct janus_session *ht_session = NULL;
 	t_hash_table_steal_extended(janus_sessions, &session->id, NULL, &ht_session);
-	if (ht_session != session)
+	if (ht_session != session) {
+		if (ht_session) // return wrongly stolen session
+			t_hash_table_insert(janus_sessions, &ht_session->id, ht_session);
 		return "Sesssion ID not found"; // already removed/destroyed
+	}
 
 	janus_session_cleanup(session);
 	obj_put(session);
@@ -1541,7 +1544,6 @@ static const char *janus_message(struct websocket_message *wm, JsonReader *reade
 	}
 
 	return err;
-
 }
 
 
