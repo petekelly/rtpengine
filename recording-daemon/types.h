@@ -186,6 +186,7 @@ struct decode_s {
 	decoder_t *dec;
 	resample_t mix_resampler;
 	unsigned int mixer_idx;
+	uint32_t last_ssrc;
 };
 
 
