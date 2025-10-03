@@ -90,6 +90,11 @@ decode_t *decoder_new(const char *payload_str, const char *format, int ptime, ou
 	decode_t *deco = g_slice_alloc0(sizeof(decode_t));
 	deco->dec = dec;
 	deco->mixer_idx = (unsigned int) -1;
+	deco->mixer_idx_ssrc = 0xFFFFFFFF;
+	deco->last_ssrc = 0xFFFFFFFF;
+	deco->last_clockrate = out_format.clockrate;
+	deco->last_channels = out_format.channels;
+	deco->last_format = out_format.format;
 	return deco;
 }
 
@@ -114,17 +119,34 @@ static int decoder_got_frame(decoder_t *dec, AVFrame *frame, void *sp, void *dp)
 	pthread_mutex_lock(&metafile->mix_lock);
 	if (metafile->mix_out) {
 		dbg("adding packet from stream #%lu to mix output", stream->id);
-		// If SSRC changed, force a new slot lookup
-        if (deco->last_ssrc != ssrc->ssrc) {
-            deco->mixer_idx = (unsigned int)-1;
-            deco->last_ssrc = ssrc->ssrc;
-        }
-		if (G_UNLIKELY(deco->mixer_idx == (unsigned int) -1))
+		 // Robust slot validation: check if cached mixer_idx is valid for this SSRC
+		if (deco->mixer_idx != (unsigned int)-1 && deco->mixer_idx_ssrc != ssrc->ssrc) {
+			deco->mixer_idx = (unsigned int)-1;
+		}
+		if (deco->last_ssrc != ssrc->ssrc) {
+			deco->mixer_idx = (unsigned int)-1;
+			deco->last_ssrc = ssrc->ssrc;
+		}
+		if (G_UNLIKELY(deco->mixer_idx == (unsigned int) -1)) {
 			deco->mixer_idx = mix_get_index(metafile->mix, ssrc->ssrc, stream->media_sdp_id, stream->channel_slot);
+			deco->mixer_idx_ssrc = ssrc->ssrc;
+		}
 		format_t actual_format;
 		if (output_config(metafile->mix_out, &dec->dest_format, &actual_format))
 			goto no_mix_out;
 		mix_config(metafile->mix, &actual_format);
+		 // If SSRC or output format changed, force a new slot lookup
+		if (deco->last_ssrc != ssrc->ssrc ||
+		    deco->last_clockrate != actual_format.clockrate ||
+		    deco->last_channels != actual_format.channels ||
+		    deco->last_format != actual_format.format) {
+			deco->mixer_idx = (unsigned int)-1;
+			deco->mixer_idx_ssrc = 0xFFFFFFFF;
+			deco->last_ssrc = ssrc->ssrc;
+			deco->last_clockrate = actual_format.clockrate;
+			deco->last_channels = actual_format.channels;
+			deco->last_format = actual_format.format;
+		}
 		// XXX might be a second resampling to same format
 		AVFrame *dec_frame = resample_frame(&deco->mix_resampler, frame, &actual_format);
 		if (!dec_frame) {
@@ -134,6 +156,7 @@ static int decoder_got_frame(decoder_t *dec, AVFrame *frame, void *sp, void *dp)
 		if (mix_add(metafile->mix, dec_frame, deco->mixer_idx, ssrc->ssrc, metafile->mix_out)) {
 			ilog(LOG_ERR, "Failed to add decoded packet to mixed output");
 			deco->mixer_idx = (unsigned int)-1; // Force new slot lookup on next frame
+			deco->mixer_idx_ssrc = 0xFFFFFFFF;
 		}
 	}
 no_mix_out:

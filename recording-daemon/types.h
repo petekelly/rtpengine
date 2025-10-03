@@ -186,9 +186,12 @@ struct decode_s {
 	decoder_t *dec;
 	resample_t mix_resampler;
 	unsigned int mixer_idx;
+	uint32_t mixer_idx_ssrc; // SSRC for which mixer_idx is valid
 	uint32_t last_ssrc;
+	int last_clockrate;
+	int last_channels;
+	int last_format;
 };
-
 
 
 #endif
