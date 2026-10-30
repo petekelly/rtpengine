@@ -1,3 +1,4 @@
+<!-- Copilot: Lines_Original=119; Lines_Added=31; Lines_Edited=0; Last_AI_EditUTC=2026-10-30T13:33:15Z -->
 Unit-tests
 ==========
 
@@ -117,3 +118,34 @@ Individually the unit tests can be executed normally, but the `auto-daemon-tests
 This even works with rtpengine running under a debugger or valgrind.
 
 Another set of tests that is included is to run all of the `make check` tests under libasan. The top-level `make asan-check` target exists for that purpose and requires an initially clean source directory to execute properly.
+
+### PCI telephone-event suppression regression (CAP-468)
+
+Use the normal Linux build dependencies (the same ones installed by
+`.github/workflows/unit-tests.yml`), with transcoding enabled. From the
+repository root:
+
+```sh
+make -C daemon -j4
+make -C t -j4 test-transcode
+G_DEBUG=fatal-warnings ./t/test-transcode
+make -C t daemon-tests-pci-dtmf
+```
+
+`test-transcode` verifies exact output payloads for a complete unseen event
+overtaken by eleven newer audio packets, with no receive-event tracking.
+It also covers partial events, duplicates, malformed/compound payloads,
+invalid replacement digits, sequence/timestamp wraparound, directional
+isolation, suppression disabled, DROP/ZERO, injection provenance and the
+final-send policy guard. Received payload storage must remain unchanged.
+
+`daemon-tests-pci-dtmf` uses the existing real-daemon/fake-network
+infrastructure; it needs no recorder, capture or external SIP endpoint.
+It checks every forwarded event payload with delay-buffer values 0, 1
+and 100 ms, malformed-packet drop, reverse-leg isolation and activation/
+deactivation with buffered events. It is also included in `make check`.
+
+These are synthetic regressions, not PCI lab acceptance. Before deployment,
+verify the built revision and repeat the load scenario with an independent
+raw egress capture; notifications or a successful compilation alone are not
+proof that original digits cannot escape.

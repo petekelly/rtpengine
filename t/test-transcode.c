@@ -1,3 +1,4 @@
+/* Copilot: Lines_Original=1737; Lines_Added=106; Lines_Edited=0; Last_AI_EditUTC=2026-10-30T13:33:15Z */
 #include "codec.h"
 #include "call.h"
 #include "call_interfaces.h"
@@ -294,6 +295,8 @@ static void __packet_seq_ts(const char *file, int line, struct call_media *media
 	printf("\n");
 
 	h->handler_func(h, &mp);
+	if ((pt_in & 0x7f) == 101)
+		assert(memcmp(mp.payload.s, pl.s, pl.len) == 0);
 
 	if (pt_out == -1) {
 		if (mp.packets_out.length != 0) {
@@ -414,6 +417,107 @@ static void dtmf(const char *s) {
 #define AMR_WB_payload "\xf0\x1c\xf3\x06\x08\x10\x77\x32\x23\x20\xd3\x50\x62\x12\xc7\x7c\xe2\xea\x84\x0e\x6e\xf4\x4d\xe4\x7f\xc9\x4c\xcc\x58\x5d\xed\xcc\x5d\x7c\x6c\x14\x7d\xc0" // octet aligned
 #define AMR_WB_payload_noe "\xf1\xfc\xc1\x82\x04\x1d\xcc\x88\xc8\x34\xd4\x18\x84\xb1\xdf\x38\xba\xa1\x03\x9b\xbd\x13\x79\x1f\xf2\x53\x33\x16\x17\x7b\x73\x17\x5f\x1b\x05\x1f\x70" // bandwidth efficient
 
+#define pci_packet(...) do { \
+	g_hash_table_remove_all(rtp_seq_ht); \
+	packet_seq(__VA_ARGS__); \
+} while (0)
+
+static void test_pci_late_dtmf(void) {
+	start();
+	ml_A->block_dtmf = BLOCK_DTMF_DTMF;
+	ml_A->dtmf_digit = 'D';
+	sdp_pt(0, PCMU, 8000);
+	sdp_pt(101, telephone-event, 8000);
+	offer();
+	sdp_pt(0, PCMU, 8000);
+	sdp_pt(101, telephone-event, 8000);
+	answer();
+
+	// Eleven newer audio packets overtake a complete, previously unseen event.
+	for (int i = 0; i < 11; i++)
+		pci_packet(A, 0, PCMU_payload, 238560 + i * 160, 53074 + i, 0, PCMU_payload);
+	pci_packet(A, 101 | 0x80, "\x01\x0a\x00\xa0", 237440, 53067,
+			101 | 0x80, "\x0f\x0a\x00\xa0");
+	pci_packet(A, 101, "\x01\x0a\x01\x40", 237440, 53068, 101, "\x0f\x0a\x01\x40");
+	pci_packet(A, 101, "\x01\x0a\x01\xe0", 237440, 53069, 101, "\x0f\x0a\x01\xe0");
+	pci_packet(A, 101, "\x01\x0a\x02\x80", 237440, 53070, 101, "\x0f\x0a\x02\x80");
+	pci_packet(A, 101, "\x01\x8a\x03\x20", 237440, 53071, 101, "\x0f\x8a\x03\x20");
+	pci_packet(A, 101, "\x01\x8a\x03\x20", 237440, 53072, 101, "\x0f\x8a\x03\x20");
+	pci_packet(A, 101, "\x01\x8a\x03\x20", 237440, 53073, 101, "\x0f\x8a\x03\x20");
+	assert(media_A->dtmf_recv.length == 0);
+	// Genuine duplicate, end-only event, malformed/compound payloads, and invalid replacement.
+	pci_packet(A, 101, "\x01\x8a\x03\x20", 237440, 53073, 101, "\x0f\x8a\x03\x20");
+	pci_packet(A, 101, "\x02\x8a\x03\x20", 237280, 53066, 101, "\x0f\x8a\x03\x20");
+	pci_packet(A, 101, "\x01\x8a", 237440, 53065, -1, "");
+	pci_packet(A, 101, "\x01\x8a\x03\x20\x02\x8a\x03\x20", 237440, 53064, -1, "");
+	ml_A->dtmf_digit = '?';
+	pci_packet(A, 101, "\x01\x8a\x03\x20", 237440, 53063, -1, "");
+	ml_A->dtmf_digit = 'D';
+	// Directionality and disabling suppression must retain the original digit.
+	pci_packet(B, 101 | 0x80, "\x03\x0a\x00\xa0", 237440, 100,
+			101 | 0x80, "\x03\x0a\x00\xa0");
+	ml_A->block_dtmf = BLOCK_DTMF_OFF;
+	pci_packet(A, 101, "\x01\x8a\x03\x20", 237440, 53062, 101, "\x01\x8a\x03\x20");
+	ml_A->block_dtmf = BLOCK_DTMF_DROP;
+	pci_packet(A, 101, "\x01\x8a\x03\x20", 237440, 53061, -1, "");
+	ml_A->block_dtmf = BLOCK_DTMF_ZERO;
+	ml_A->dtmf_digit = '0';
+	pci_packet(A, 101 | 0x80, "\x04\x0a\x00\xa0", 243000, 53085,
+			101 | 0x80, "\x00\x0a\x00\xa0");
+	pci_packet(A, 101, "\x04\x8a\x01\x40", 243000, 53086, 101, "\x00\x8a\x01\x40");
+
+	// Already encoded/encrypted packets cannot be rewritten: fail closed at final send.
+	struct codec_packet queued = { .dtmf_source = ml_A, .dtmf_replace_code = -1 };
+	assert(!codec_packet_dtmf_allowed(&queued));
+	queued.dtmf_replace_code = 0;
+	assert(codec_packet_dtmf_allowed(&queued));
+	ml_A->block_dtmf = BLOCK_DTMF_DTMF;
+	ml_A->dtmf_digit = 'D';
+	assert(!codec_packet_dtmf_allowed(&queued));
+	queued.dtmf_replace_code = 15;
+	assert(codec_packet_dtmf_allowed(&queued));
+	ml_A->block_dtmf = BLOCK_DTMF_DROP;
+	assert(!codec_packet_dtmf_allowed(&queued));
+	ml_A->block_dtmf = BLOCK_DTMF_SILENCE;
+	assert(!codec_packet_dtmf_allowed(&queued));
+	ml_A->block_dtmf = BLOCK_DTMF_OFF;
+	assert(codec_packet_dtmf_allowed(&queued));
+	ml_A->block_dtmf = BLOCK_DTMF_DTMF;
+
+	struct codec_handler *h = codec_handler_get(media_A, 0, media_B, NULL);
+	struct codec_ssrc_handler *csh = get_ssrc(ssrc_A, h->ssrc_hash);
+	assert(csh);
+	// Explicit application injection is preserved, but never exempts a late received packet.
+	codec_add_dtmf_event(csh, '7', -10, 0, true);
+	pci_packet(A, 101 | 0x80, "\x05\x0a\x00\xa0", 244000, 53087,
+			101 | 0x80, "\x07\x0a\x00\xa0");
+	pci_packet(A, 101, "\x01\x8a\x03\x20", 237440, 53060, 101, "\x0f\x8a\x03\x20");
+	codec_add_dtmf_event(csh, '8', -10, 0, false);
+	pci_packet(A, 101, "\x05\x0a\x01\x40", 244000, 53088, 101, "\x0f\x0a\x00\xa0");
+	obj_put_o((struct obj *) csh);
+	end();
+}
+
+static void test_pci_wraparound(void) {
+	start();
+	ml_A->block_dtmf = BLOCK_DTMF_DTMF;
+	ml_A->dtmf_digit = 'D';
+	sdp_pt(0, PCMU, 8000);
+	sdp_pt(101, telephone-event, 8000);
+	offer();
+	sdp_pt(0, PCMU, 8000);
+	sdp_pt(101, telephone-event, 8000);
+	answer();
+	for (int i = 0; i < 11; i++)
+		pci_packet(A, 0, PCMU_payload, 0x500 + i * 160, 2 + i, 0, PCMU_payload);
+	pci_packet(A, 101 | 0x80, "\x09\x0a\x00\xa0", 0xfffffe00, 65531,
+			101 | 0x80, "\x0f\x0a\x00\xa0");
+	pci_packet(A, 101, "\x09\x8a\x03\x20", 0xfffffe00, 65535, 101, "\x0f\x8a\x03\x20");
+	pci_packet(A, 101, "\x09\x8a\x03\x20", 0xfffffe00, 0, 101, "\x0f\x8a\x03\x20");
+	assert(media_A->dtmf_recv.length == 0);
+	end();
+}
+
 int main(void) {
 	rtpe_common_config_ptr = &rtpe_config.common;
 	bufferpool_init();
@@ -426,6 +530,9 @@ int main(void) {
 	RAND_seed(&random_seed, sizeof(random_seed));
 	statistics_init();
 	codecs_init();
+
+	test_pci_late_dtmf();
+	test_pci_wraparound();
 
 	// plain
 	start();

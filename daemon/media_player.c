@@ -1,3 +1,4 @@
+/* Copilot: Lines_Original=1587; Lines_Added=7; Lines_Edited=0; Last_AI_EditUTC=2026-10-30T13:33:15Z */
 #include "media_player.h"
 
 #include <glib.h>
@@ -333,6 +334,13 @@ static bool __send_timer_send_1(struct rtp_header *rh, struct packet_stream *sin
 
 static void __send_timer_send_common(struct send_timer *st, struct codec_packet *cp) {
 	log_info_stream_fd(st->sink->selected_sfd);
+
+	// Policy can change after encoding/encryption but before the send deadline.
+	if (!codec_packet_dtmf_allowed(cp)) {
+		ilogs(transcoding, LOG_WARN | LOG_FLAG_LIMIT,
+				"Dropping queued telephone-event after DTMF policy change");
+		goto out;
+	}
 
 	if (!__send_timer_send_1(cp->rtp, st->sink, cp))
 		goto out;

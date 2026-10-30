@@ -1,3 +1,4 @@
+<!-- Copilot: Lines_Original=2262; Lines_Added=13; Lines_Edited=0; Last_AI_EditUTC=2026-10-30T13:33:15Z -->
 # The *NG* Control Protocol
 
 In order to provide several advanced features in *rtpengine*, a new advanced
@@ -287,6 +288,19 @@ Optionally included keys are:
 	similar to `random` except that a zero event is always used; `DTMF`
 	which is similar to `zero` except that a different DTMF digit can be
 	specified; `off` to disable DTMF blocking.
+
+	For `zero` and `DTMF`, received telephone-event packets are replaced
+	independently of event detection, including late packets and duplicates.
+	Unprocessable payloads (including payloads other than a single four-byte
+	event) or an invalid replacement digit are dropped, never passed through.
+	Audio replacement still uses the detected event windows.
+
+	The current directional policy is checked when buffered events are
+	produced and again at final send. Already encoded/encrypted events that
+	do not match the active replacement are dropped rather than rewritten.
+	After unblocking, buffered original events may pass through again.
+	Explicitly application-injected events retain their configured digit;
+	an active injection does not exempt received events, including duplicates.
 
 * `DTMF-security-trigger`
 

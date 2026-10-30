@@ -1,3 +1,4 @@
+/* Copilot: Lines_Original=5973; Lines_Added=61; Lines_Edited=42; Last_AI_EditUTC=2026-10-30T13:33:15Z */
 #include "codec.h"
 
 #include <glib.h>
@@ -234,7 +235,8 @@ struct transcode_packet {
 	str *payload;
 	struct codec_handler *handler;
 	unsigned int marker:1,
-	             bypass_seq:1;
+	             bypass_seq:1,
+	             injected:1;
 	tc_code (*packet_func)(struct codec_ssrc_handler *, struct codec_ssrc_handler *, struct transcode_packet *,
 			struct media_packet *);
 	int (*dup_func)(struct codec_ssrc_handler *, struct codec_ssrc_handler *, struct transcode_packet *,
@@ -2154,6 +2156,32 @@ static struct codec_ssrc_handler *__output_ssrc_handler(struct codec_ssrc_handle
 	return new_ch;
 }
 
+static bool packet_dtmf_replace(str *payload, struct media_packet *mp, int *replace_code) {
+	*replace_code = -1;
+	struct call_monologue *ml = mp->media->monologue;
+	enum block_dtmf_mode mode = dtmf_get_block_mode(mp->call, ml);
+	if (mode == BLOCK_DTMF_OFF)
+		return true;
+	if (mode != BLOCK_DTMF_ZERO && mode != BLOCK_DTMF_DTMF)
+		return false;
+	int digit = dtmf_code_from_char(ml->dtmf_digit);
+	if (payload->len != sizeof(struct telephone_event_payload) || digit < 0) {
+		ilogs(transcoding, LOG_WARN | LOG_FLAG_LIMIT,
+				"Dropping unprocessable telephone-event during DTMF replacement");
+		return false;
+	}
+	struct telephone_event_payload *dtmf = (void *) payload->s;
+	dtmf->event = digit;
+	*replace_code = digit;
+	return true;
+}
+
+static void packet_dtmf_mark(struct media_packet *mp, int replace_code) {
+	struct codec_packet *p = t_queue_peek_tail(&mp->packets_out);
+	p->dtmf_source = mp->media->monologue;
+	p->dtmf_replace_code = replace_code;
+}
+
 static int codec_add_dtmf_packet(struct codec_ssrc_handler *ch, struct codec_ssrc_handler *input_ch,
 		struct transcode_packet *packet,
 		unsigned long ts_delay,
@@ -2162,6 +2190,12 @@ static int codec_add_dtmf_packet(struct codec_ssrc_handler *ch, struct codec_ssr
 {
 	struct codec_handler *h = ch->handler;
 	struct codec_ssrc_handler *output_ch = NULL;
+	int replace_code = -1;
+
+	// Enforce at egress, including late/duplicate packets and buffered policy changes.
+	// Received payloads are private per-destination copies; tracking is not an authority.
+	if (!packet->injected && !packet_dtmf_replace(packet->payload, mp, &replace_code))
+		return 0;
 
 	// grab our underlying PCM transcoder
 	output_ch = __output_ssrc_handler(input_ch, mp);
@@ -2224,6 +2258,8 @@ skip:
 	else // use our own sequencing
 		codec_output_rtp(mp, &ch->csch, packet->handler ? : h, buf, packet->payload->len, packet->ts,
 				packet->marker, -1, 0, payload_type, ts_delay);
+	if (!packet->injected)
+		packet_dtmf_mark(mp, replace_code);
 	mp->ssrc_out->parent->seq_diff++;
 
 	return 0;
@@ -2317,8 +2353,11 @@ static tc_code packet_dtmf(struct codec_ssrc_handler *ch, struct codec_ssrc_hand
 		char buf[sizeof(struct telephone_event_payload)];
 		str ev_pl = STR_INIT_LEN(buf, sizeof(buf));
 
+		bool injected = input_ch->dtmf_event.injected;
 		int is_dtmf = dtmf_event_payload(&ev_pl, &ts, duration,
 				&input_ch->dtmf_event, &input_ch->dtmf_events);
+		if (is_dtmf != 3)
+			injected = input_ch->dtmf_event.injected;
 		if (is_dtmf) {
 			// generate appropriate transcode_packets
 			unsigned int copies = 1;
@@ -2339,6 +2378,7 @@ static tc_code packet_dtmf(struct codec_ssrc_handler *ch, struct codec_ssrc_hand
 				dup->payload = str_dup(&ev_pl);
 				dup->rtp = r;
 				dup->bypass_seq = 0;
+				dup->injected = injected;
 				dup->ts = ts;
 				if (is_dtmf == 1)
 					dup->marker = 1;
@@ -2452,6 +2492,18 @@ static int handler_func_t38(struct codec_handler *h, struct media_packet *mp) {
 #endif
 
 
+
+bool codec_packet_dtmf_allowed(const struct codec_packet *p) {
+	if (!p->dtmf_source)
+		return true;
+	enum block_dtmf_mode mode = dtmf_get_block_mode(NULL, p->dtmf_source);
+	if (mode == BLOCK_DTMF_OFF)
+		return true;
+	if (mode != BLOCK_DTMF_ZERO && mode != BLOCK_DTMF_DTMF)
+		return false;
+	int digit = dtmf_code_from_char(p->dtmf_source->dtmf_digit);
+	return digit >= 0 && p->dtmf_replace_code == digit;
+}
 
 void codec_packet_free(void *pp) {
 	struct codec_packet *p = pp;
@@ -2699,7 +2751,7 @@ static void __dtmf_dsp_callback(void *ptr, int code, int level, int delay) {
 }
 
 void codec_add_dtmf_event(struct codec_ssrc_handler *ch, int code, int level, uint64_t ts, bool injected) {
-	struct dtmf_event new_ev = { .code = code, .volume = level, .ts = ts };
+	struct dtmf_event new_ev = { .code = code, .volume = level, .ts = ts, .injected = injected };
 	ilogs(transcoding, LOG_DEBUG, "DTMF event state change: code %i, volume %i, TS %lu",
 			new_ev.code, new_ev.volume, (unsigned long) ts);
 	dtmf_dsp_event(&new_ev, &ch->dtmf_state, ch->handler->media, ch->handler->source_pt.clock_rate,
@@ -3132,44 +3184,6 @@ static void delay_frame_manipulate(struct delay_frame *dframe) {
 			break;
 	}
 }
-static void delay_packet_manipulate(struct delay_frame *dframe) {
-	struct call_media *media = dframe->mp.media;
-	if (!media)
-		return;
-	if (!dframe->handler)
-		return;
-
-	struct media_packet *mp = &dframe->mp;
-
-	if (is_in_dtmf_event(&media->dtmf_recv, dframe->ts, dframe->clockrate, media->buffer_delay,
-				media->buffer_delay))
-	{
-		// is this a DTMF event packet?
-		if (!dframe->handler->source_pt.codec_def || !dframe->handler->source_pt.codec_def->dtmf)
-			return;
-
-		struct call_monologue *ml = media->monologue;
-		enum block_dtmf_mode mode = dtmf_get_block_mode(dframe->mp.call, ml);
-
-		// this can be a "raw" or "packet" - get the appropriate payload
-		str *payload = &mp->raw;
-		if (dframe->packet)
-			payload = dframe->packet->payload;
-
-		struct telephone_event_payload *dtmf = (void *) payload->s;
-		if (payload->len < sizeof(*dtmf))
-			return;
-
-		switch (mode) {
-			case BLOCK_DTMF_ZERO:
-			case BLOCK_DTMF_DTMF:
-				dtmf->event = dtmf_code_from_char(ml->dtmf_digit);
-				break;
-			default:
-				break;
-		}
-	}
-}
 static void __delay_frame_process(struct delay_buffer *dbuf, struct delay_frame *dframe) {
 	struct codec_ssrc_handler *csh = dframe->ch;
 
@@ -3179,11 +3193,9 @@ static void __delay_frame_process(struct delay_buffer *dbuf, struct delay_frame 
 				csh, &dframe->mp);
 	}
 	else if (dframe->raw_func) {
-		delay_packet_manipulate(dframe);
 		dframe->raw_func(&dframe->mp, dframe->clockrate);
 	}
 	else if (dframe->packet_func && dframe->packet) {
-		delay_packet_manipulate(dframe);
 		dframe->packet_func(csh, dframe->input_ch, dframe->packet, dframe->ts_delay,
 				dframe->payload_type, &dframe->mp);
 	}
@@ -4104,11 +4116,19 @@ static void __packet_encoded_tx(AVPacket *pkt, struct codec_ssrc_handler *ch, st
 	if (dtmf_pt == -1)
 		dtmf_pt = ch->handler->real_dtmf_payload_type;
 	int is_dtmf = 0;
+	bool injected = ch->dtmf_event.injected;
+	int replace_code = -1;
 
 	if (dtmf_pt != -1)
 		is_dtmf = dtmf_event_payload(inout, (uint64_t *) &pkt->pts, pkt->duration,
 				&ch->dtmf_event, &ch->dtmf_events);
+	if (is_dtmf != 3)
+		injected = ch->dtmf_event.injected;
 	if (is_dtmf) {
+		if (!injected && !packet_dtmf_replace(inout, mp, &replace_code)) {
+			bufferpool_unref(buf);
+			return;
+		}
 		payload_type = dtmf_pt;
 		if (is_dtmf == 1)
 			ch->rtp_mark = 1; // DTMF start event
@@ -4139,6 +4159,8 @@ static void __packet_encoded_tx(AVPacket *pkt, struct codec_ssrc_handler *ch, st
 				+ fraction_divl(pkt->pts, cr_fact),
 				ch->rtp_mark ? 1 : 0,
 				payload_type, ts_delay);
+		if (is_dtmf && !injected)
+			packet_dtmf_mark(mp, replace_code);
 		mp->ssrc_out->parent->seq_diff++;
 		ch->rtp_mark = 0;
 	} while (repeats--);

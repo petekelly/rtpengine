@@ -1,3 +1,4 @@
+/* Copilot: Lines_Original=247; Lines_Added=5; Lines_Edited=0; Last_AI_EditUTC=2026-10-30T13:33:15Z */
 #ifndef __CODEC_H__
 #define __CODEC_H__
 
@@ -76,7 +77,12 @@ struct codec_packet {
 	struct ssrc_ctx *ssrc_out;
 	void (*free_func)(void *);
 	void (*plain_free_func)(void *);
+	struct call_monologue *dtmf_source;
+	int dtmf_replace_code; // -1 if received telephone-event was not masked
 };
+
+// Call master lock must be held; encrypted payloads are never modified here.
+bool codec_packet_dtmf_allowed(const struct codec_packet *);
 
 struct codec_scheduler {
 	unsigned long first_ts; // for output TS scaling
