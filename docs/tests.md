@@ -1,4 +1,4 @@
-<!-- Copilot: Lines_Original=119; Lines_Added=31; Lines_Edited=0; Last_AI_EditUTC=2026-10-30T13:33:15Z -->
+<!-- Copilot: Lines_Original=119; Lines_Added=33; Lines_Edited=0; Last_AI_EditUTC=2026-10-30T13:37:02Z -->
 Unit-tests
 ==========
 
@@ -138,6 +138,8 @@ It also covers partial events, duplicates, malformed/compound payloads,
 invalid replacement digits, sequence/timestamp wraparound, directional
 isolation, suppression disabled, DROP/ZERO, injection provenance and the
 final-send policy guard. Received payload storage must remain unchanged.
+It separately checks stable outgoing event timestamps with interleaved audio,
+including an input event timestamp of zero (upstream `2d193363` backport).
 
 `daemon-tests-pci-dtmf` uses the existing real-daemon/fake-network
 infrastructure; it needs no recorder, capture or external SIP endpoint.

@@ -1,4 +1,4 @@
-/* Copilot: Lines_Original=5973; Lines_Added=61; Lines_Edited=42; Last_AI_EditUTC=2026-10-30T13:33:15Z */
+/* Copilot: Lines_Original=5973; Lines_Added=81; Lines_Edited=59; Last_AI_EditUTC=2026-10-30T13:37:02Z */
 #include "codec.h"
 
 #include <glib.h>
@@ -212,7 +212,8 @@ struct codec_ssrc_handler {
 	dtmf_rx_state_t *dtmf_dsp;
 	resample_t dtmf_resampler;
 	format_t dtmf_format;
-	uint64_t dtmf_ts, last_dtmf_event_ts;
+	uint64_t dtmf_ts, last_dtmf_event_ts, dtmf_out_ts;
+	bool dtmf_out_ts_valid;
 	dtmf_event_q dtmf_events;
 	struct dtmf_event dtmf_event; // for replacing PCM with DTMF event
 	struct dtmf_event dtmf_state; // state tracker for DTMF actions
@@ -2208,23 +2209,26 @@ static int codec_add_dtmf_packet(struct codec_ssrc_handler *ch, struct codec_ssr
 	// event. however, we must shift the FIFO PTS forward as the DTMF event goes on
 	// as the DTMF event replaces the audio samples. therefore we must remember
 	// the TS at the start of the event and the last seen event duration.
-	if (ch->dtmf_ts != packet->ts) {
+	if (!ch->dtmf_out_ts_valid || ch->dtmf_ts != packet->ts) {
 		// this is a new event
 		ch->dtmf_ts = packet->ts; // start TS
 		ch->last_dtmf_event_ts = 0; // last DTMF event duration
+
+		unsigned long ts = fraction_divl(output_ch->encoder->next_pts, &output_ch->encoder->clockrate_fact);
+		// roll back TS to start of event
+		ts -= ch->last_dtmf_event_ts;
+		// adjust to output RTP TS
+		unsigned long packet_ts = ts + output_ch->csch.first_ts;
+		ch->dtmf_out_ts = packet_ts;
+		ch->dtmf_out_ts_valid = true;
+
+		ilogs(transcoding, LOG_DEBUG, "Scaling DTMF packet timestamp and duration: TS %lu -> %lu "
+				"(%u -> %u)",
+				packet->ts, packet_ts,
+				h->source_pt.clock_rate, h->dest_pt.clock_rate);
 	}
 
-	unsigned long ts = fraction_divl(output_ch->encoder->next_pts, &output_ch->encoder->clockrate_fact);
-	// roll back TS to start of event
-	ts -= ch->last_dtmf_event_ts;
-	// adjust to output RTP TS
-	unsigned long packet_ts = ts + output_ch->csch.first_ts;
-
-	ilogs(transcoding, LOG_DEBUG, "Scaling DTMF packet timestamp and duration: TS %lu -> %lu "
-			"(%u -> %u)",
-			packet->ts, packet_ts,
-			h->source_pt.clock_rate, h->dest_pt.clock_rate);
-	packet->ts = packet_ts;
+	packet->ts = ch->dtmf_out_ts;
 
 	if (packet->payload->len >= sizeof(struct telephone_event_payload)) {
 		struct telephone_event_payload *dtmf = (void *) packet->payload->s;
@@ -2238,10 +2242,16 @@ static int codec_add_dtmf_packet(struct codec_ssrc_handler *ch, struct codec_ssr
 			ch->dtmf_first_duration = duration;
 		ts_delay = duration - ch->dtmf_first_duration;
 
-		// shift forward our output RTP TS
-		output_ch->encoder->next_pts = fraction_multl(ts + duration, &output_ch->encoder->clockrate_fact);
-		output_ch->encoder->packet_pts += fraction_multl(duration - ch->last_dtmf_event_ts, &output_ch->encoder->clockrate_fact);
-		ch->last_dtmf_event_ts = duration;
+		if (ch->last_dtmf_event_ts != duration) {
+			// shift forward our output RTP TS
+			output_ch->encoder->next_pts
+				= fraction_multl(packet->ts - output_ch->csch.first_ts + duration,
+					&output_ch->encoder->clockrate_fact);
+			output_ch->encoder->packet_pts
+				+= fraction_multl(duration - ch->last_dtmf_event_ts,
+					&output_ch->encoder->clockrate_fact);
+			ch->last_dtmf_event_ts = duration;
+		}
 	}
 	payload_type = h->dtmf_payload_type;
 	if (payload_type == -1)

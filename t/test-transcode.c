@@ -1,4 +1,4 @@
-/* Copilot: Lines_Original=1737; Lines_Added=106; Lines_Edited=0; Last_AI_EditUTC=2026-10-30T13:33:15Z */
+/* Copilot: Lines_Original=1737; Lines_Added=141; Lines_Edited=0; Last_AI_EditUTC=2026-10-30T13:37:02Z */
 #include "codec.h"
 #include "call.h"
 #include "call_interfaces.h"
@@ -518,6 +518,39 @@ static void test_pci_wraparound(void) {
 	end();
 }
 
+static uint32_t single_output_ts(void) {
+	assert(g_hash_table_size(rtp_ts_ht) == 1);
+	GHashTableIter iter;
+	gpointer ts;
+	g_hash_table_iter_init(&iter, rtp_ts_ht);
+	assert(g_hash_table_iter_next(&iter, NULL, &ts));
+	return GPOINTER_TO_UINT(ts);
+}
+
+static void test_dtmf_interleaved_audio(uint32_t input_ts) {
+	start();
+	ml_A->block_dtmf = BLOCK_DTMF_DTMF;
+	ml_A->dtmf_digit = 'D';
+	sdp_pt(0, PCMU, 8000);
+	sdp_pt(101, telephone-event, 8000);
+	offer();
+	sdp_pt(0, PCMU, 8000);
+	sdp_pt(101, telephone-event, 8000);
+	answer();
+	pci_packet(A, 0, PCMU_payload, 1000000, 210, 0, PCMU_payload);
+	pci_packet(A, 101 | 0x80, "\x01\x0a\x00\xa0", input_ts, 201,
+			101 | 0x80, "\x0f\x0a\x00\xa0");
+	uint32_t event_ts = single_output_ts();
+	assert(event_ts != 0);
+	pci_packet(A, 0, PCMU_payload, 1000160, 211, 0, PCMU_payload);
+	pci_packet(A, 101, "\x01\x8a\x01\xe0", input_ts, 202, 101, "\x0f\x8a\x01\xe0");
+	assert(single_output_ts() == event_ts);
+	pci_packet(A, 0, PCMU_payload, 1000320, 212, 0, PCMU_payload);
+	pci_packet(A, 101, "\x01\x8a\x01\xe0", input_ts, 203, 101, "\x0f\x8a\x01\xe0");
+	assert(single_output_ts() == event_ts);
+	end();
+}
+
 int main(void) {
 	rtpe_common_config_ptr = &rtpe_config.common;
 	bufferpool_init();
@@ -533,6 +566,8 @@ int main(void) {
 
 	test_pci_late_dtmf();
 	test_pci_wraparound();
+	test_dtmf_interleaved_audio(999000);
+	test_dtmf_interleaved_audio(0);
 
 	// plain
 	start();
