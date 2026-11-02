@@ -1,3 +1,4 @@
+/* Copilot: Lines_Original=82; Lines_Added=1; Lines_Edited=0; Last_AI_EditUTC=2026-11-02T12:20:36Z */
 #ifndef _DTMF_H_
 #define _DTMF_H_
 
@@ -56,6 +57,7 @@ struct dtmf_event {
 	int rand_code; // state for random replace mode
 	unsigned int index; // running counter of events
 	enum block_dtmf_mode block_dtmf; // block mode at the time of the event
+	bool injected;
 };
 
 bool dtmf_init(void);

@@ -1,3 +1,4 @@
+<!-- Copilot: Lines_Original=119; Lines_Added=27; Lines_Edited=0; Last_AI_EditUTC=2026-11-02T12:20:36Z -->
 Unit-tests
 ==========
 
@@ -117,3 +118,30 @@ Individually the unit tests can be executed normally, but the `auto-daemon-tests
 This even works with rtpengine running under a debugger or valgrind.
 
 Another set of tests that is included is to run all of the `make check` tests under libasan. The top-level `make asan-check` target exists for that purpose and requires an initially clean source directory to execute properly.
+
+### Late telephone-event suppression regression
+
+Build the daemon and transcoding test with the normal project dependencies:
+
+```sh
+make -C daemon -j4
+make -C t -j4 test-transcode
+G_DEBUG=fatal-warnings ./t/test-transcode
+make -C t daemon-tests-dtmf-suppression
+```
+
+`test-transcode` verifies that a complete unseen event is replaced even after
+newer audio packets arrive, without receive-event tracking. It also covers
+partial events, duplicates, malformed payloads, invalid replacement digits,
+sequence and timestamp wraparound, directional isolation, disabled and drop
+modes, injection provenance, and the final-send policy guard. Received payload
+storage must remain unchanged. Interleaved audio tests verify stable outgoing
+event timestamps, including an input event timestamp of zero.
+
+`daemon-tests-dtmf-suppression` checks forwarded event payloads with multiple
+delay-buffer settings, malformed-packet handling, reverse-direction isolation,
+and policy changes while events are buffered. It uses synthetic packet flows
+and is included in `make check`.
+
+These tests exercise synthetic packet flows and do not replace
+environment-specific integration testing.
