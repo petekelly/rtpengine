@@ -1,3 +1,4 @@
+# Copilot: Lines_Original=283; Lines_Added=3; Lines_Edited=2; Last_AI_EditUTC=2026-11-02T12:20:36Z
 TARGET=		all-tests
 
 export top_srcdir = ..
@@ -103,7 +104,7 @@ include ../lib/common.Makefile
 
 .PHONY:		all-tests unit-tests daemon-tests daemon-tests \
 	daemon-tests-main daemon-tests-jb daemon-tests-dtx daemon-tests-dtx-cn daemon-tests-pubsub \
-	daemon-tests-intfs daemon-tests-stats daemon-tests-delay-buffer daemon-tests-delay-timing \
+	daemon-tests-intfs daemon-tests-stats daemon-tests-delay-buffer daemon-tests-delay-timing daemon-tests-dtmf-suppression \
 	daemon-tests-evs daemon-tests-player-cache daemon-tests-redis daemon-tests-t38 daemon-tests-evs-dtx \
 	daemon-tests-measure-rtp daemon-tests-heuristic daemon-tests-rtcp
 
@@ -142,7 +143,7 @@ unit-tests:	$(TESTS)
 daemon-tests: daemon-tests-main daemon-tests-jb daemon-tests-pubsub daemon-tests-websocket \
 	daemon-tests-evs daemon-tests-async-tc \
 	daemon-tests-audio-player daemon-tests-audio-player-play-media \
-	daemon-tests-intfs daemon-tests-stats daemon-tests-player-cache daemon-tests-redis \
+	daemon-tests-intfs daemon-tests-stats daemon-tests-player-cache daemon-tests-redis daemon-tests-dtmf-suppression \
 	daemon-tests-rtpp-flags daemon-tests-measure-rtp daemon-tests-heuristic daemon-tests-rtcp
 
 daemon-test-deps:	tests-preload.so
@@ -177,6 +178,9 @@ daemon-tests-intfs:	daemon-test-deps
 
 daemon-tests-delay-buffer:	daemon-test-deps
 	./auto-test-helper "$@" perl -I../perl auto-daemon-tests-delay-buffer.pl
+
+daemon-tests-dtmf-suppression:	daemon-test-deps
+	./auto-test-helper "$@" perl -I../perl auto-daemon-tests-dtmf-suppression.pl
 
 daemon-tests-delay-timing:	daemon-test-deps
 	./auto-test-helper "$@" perl -I../perl auto-daemon-tests-delay-timing.pl

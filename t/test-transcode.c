@@ -1,3 +1,4 @@
+/* Copilot: Lines_Original=1737; Lines_Added=141; Lines_Edited=0; Last_AI_EditUTC=2026-11-02T12:20:36Z */
 #include "codec.h"
 #include "call.h"
 #include "call_interfaces.h"
@@ -294,6 +295,8 @@ static void __packet_seq_ts(const char *file, int line, struct call_media *media
 	printf("\n");
 
 	h->handler_func(h, &mp);
+	if ((pt_in & 0x7f) == 101)
+		assert(memcmp(mp.payload.s, pl.s, pl.len) == 0);
 
 	if (pt_out == -1) {
 		if (mp.packets_out.length != 0) {
@@ -414,6 +417,140 @@ static void dtmf(const char *s) {
 #define AMR_WB_payload "\xf0\x1c\xf3\x06\x08\x10\x77\x32\x23\x20\xd3\x50\x62\x12\xc7\x7c\xe2\xea\x84\x0e\x6e\xf4\x4d\xe4\x7f\xc9\x4c\xcc\x58\x5d\xed\xcc\x5d\x7c\x6c\x14\x7d\xc0" // octet aligned
 #define AMR_WB_payload_noe "\xf1\xfc\xc1\x82\x04\x1d\xcc\x88\xc8\x34\xd4\x18\x84\xb1\xdf\x38\xba\xa1\x03\x9b\xbd\x13\x79\x1f\xf2\x53\x33\x16\x17\x7b\x73\x17\x5f\x1b\x05\x1f\x70" // bandwidth efficient
 
+#define late_dtmf_packet(...) do { \
+	g_hash_table_remove_all(rtp_seq_ht); \
+	packet_seq(__VA_ARGS__); \
+} while (0)
+
+static void test_late_dtmf(void) {
+	start();
+	ml_A->block_dtmf = BLOCK_DTMF_DTMF;
+	ml_A->dtmf_digit = 'D';
+	sdp_pt(0, PCMU, 8000);
+	sdp_pt(101, telephone-event, 8000);
+	offer();
+	sdp_pt(0, PCMU, 8000);
+	sdp_pt(101, telephone-event, 8000);
+	answer();
+
+	// Eleven newer audio packets overtake a complete, previously unseen event.
+	for (int i = 0; i < 11; i++)
+		late_dtmf_packet(A, 0, PCMU_payload, 80000 + i * 160, 1000 + i, 0, PCMU_payload);
+	late_dtmf_packet(A, 101 | 0x80, "\x01\x0a\x00\xa0", 78880, 993,
+			101 | 0x80, "\x0f\x0a\x00\xa0");
+	late_dtmf_packet(A, 101, "\x01\x0a\x01\x40", 78880, 994, 101, "\x0f\x0a\x01\x40");
+	late_dtmf_packet(A, 101, "\x01\x0a\x01\xe0", 78880, 995, 101, "\x0f\x0a\x01\xe0");
+	late_dtmf_packet(A, 101, "\x01\x0a\x02\x80", 78880, 996, 101, "\x0f\x0a\x02\x80");
+	late_dtmf_packet(A, 101, "\x01\x8a\x03\x20", 78880, 997, 101, "\x0f\x8a\x03\x20");
+	late_dtmf_packet(A, 101, "\x01\x8a\x03\x20", 78880, 998, 101, "\x0f\x8a\x03\x20");
+	late_dtmf_packet(A, 101, "\x01\x8a\x03\x20", 78880, 999, 101, "\x0f\x8a\x03\x20");
+	assert(media_A->dtmf_recv.length == 0);
+	// Genuine duplicate, end-only event, malformed/compound payloads, and invalid replacement.
+	late_dtmf_packet(A, 101, "\x01\x8a\x03\x20", 78880, 999, 101, "\x0f\x8a\x03\x20");
+	late_dtmf_packet(A, 101, "\x02\x8a\x03\x20", 78720, 992, 101, "\x0f\x8a\x03\x20");
+	late_dtmf_packet(A, 101, "\x01\x8a", 78880, 991, -1, "");
+	late_dtmf_packet(A, 101, "\x01\x8a\x03\x20\x02\x8a\x03\x20", 78880, 990, -1, "");
+	ml_A->dtmf_digit = '?';
+	late_dtmf_packet(A, 101, "\x01\x8a\x03\x20", 78880, 989, -1, "");
+	ml_A->dtmf_digit = 'D';
+	// Directionality and disabling suppression must retain the original digit.
+	late_dtmf_packet(B, 101 | 0x80, "\x03\x0a\x00\xa0", 78880, 100,
+			101 | 0x80, "\x03\x0a\x00\xa0");
+	ml_A->block_dtmf = BLOCK_DTMF_OFF;
+	late_dtmf_packet(A, 101, "\x01\x8a\x03\x20", 78880, 988, 101, "\x01\x8a\x03\x20");
+	ml_A->block_dtmf = BLOCK_DTMF_DROP;
+	late_dtmf_packet(A, 101, "\x01\x8a\x03\x20", 78880, 987, -1, "");
+	ml_A->block_dtmf = BLOCK_DTMF_ZERO;
+	ml_A->dtmf_digit = '0';
+	late_dtmf_packet(A, 101 | 0x80, "\x04\x0a\x00\xa0", 84000, 1020,
+			101 | 0x80, "\x00\x0a\x00\xa0");
+	late_dtmf_packet(A, 101, "\x04\x8a\x01\x40", 84000, 1021, 101, "\x00\x8a\x01\x40");
+
+	// Already encoded/encrypted packets cannot be rewritten: fail closed at final send.
+	struct codec_packet queued = { .dtmf_source = ml_A, .dtmf_replace_code = -1 };
+	assert(!codec_packet_dtmf_allowed(&queued));
+	queued.dtmf_replace_code = 0;
+	assert(codec_packet_dtmf_allowed(&queued));
+	ml_A->block_dtmf = BLOCK_DTMF_DTMF;
+	ml_A->dtmf_digit = 'D';
+	assert(!codec_packet_dtmf_allowed(&queued));
+	queued.dtmf_replace_code = 15;
+	assert(codec_packet_dtmf_allowed(&queued));
+	ml_A->block_dtmf = BLOCK_DTMF_DROP;
+	assert(!codec_packet_dtmf_allowed(&queued));
+	ml_A->block_dtmf = BLOCK_DTMF_SILENCE;
+	assert(!codec_packet_dtmf_allowed(&queued));
+	ml_A->block_dtmf = BLOCK_DTMF_OFF;
+	assert(codec_packet_dtmf_allowed(&queued));
+	ml_A->block_dtmf = BLOCK_DTMF_DTMF;
+
+	struct codec_handler *h = codec_handler_get(media_A, 0, media_B, NULL);
+	struct codec_ssrc_handler *csh = get_ssrc(ssrc_A, h->ssrc_hash);
+	assert(csh);
+	// Explicit application injection is preserved, but never exempts a late received packet.
+	codec_add_dtmf_event(csh, '7', -10, 0, true);
+	late_dtmf_packet(A, 101 | 0x80, "\x05\x0a\x00\xa0", 85000, 1022,
+			101 | 0x80, "\x07\x0a\x00\xa0");
+	late_dtmf_packet(A, 101, "\x01\x8a\x03\x20", 78880, 986, 101, "\x0f\x8a\x03\x20");
+	codec_add_dtmf_event(csh, '8', -10, 0, false);
+	late_dtmf_packet(A, 101, "\x05\x0a\x01\x40", 85000, 1023, 101, "\x0f\x0a\x00\xa0");
+	obj_put_o((struct obj *) csh);
+	end();
+}
+
+static void test_dtmf_wraparound(void) {
+	start();
+	ml_A->block_dtmf = BLOCK_DTMF_DTMF;
+	ml_A->dtmf_digit = 'D';
+	sdp_pt(0, PCMU, 8000);
+	sdp_pt(101, telephone-event, 8000);
+	offer();
+	sdp_pt(0, PCMU, 8000);
+	sdp_pt(101, telephone-event, 8000);
+	answer();
+	for (int i = 0; i < 11; i++)
+		late_dtmf_packet(A, 0, PCMU_payload, 80000 + i * 160, 1000 + i, 0, PCMU_payload);
+	late_dtmf_packet(A, 101 | 0x80, "\x09\x0a\x00\xa0", UINT32_MAX - 511, UINT16_MAX - 4,
+			101 | 0x80, "\x0f\x0a\x00\xa0");
+	late_dtmf_packet(A, 101, "\x09\x8a\x03\x20", UINT32_MAX - 511, UINT16_MAX, 101, "\x0f\x8a\x03\x20");
+	late_dtmf_packet(A, 101, "\x09\x8a\x03\x20", UINT32_MAX - 511, 0, 101, "\x0f\x8a\x03\x20");
+	assert(media_A->dtmf_recv.length == 0);
+	end();
+}
+
+static uint32_t single_output_ts(void) {
+	assert(g_hash_table_size(rtp_ts_ht) == 1);
+	GHashTableIter iter;
+	gpointer ts;
+	g_hash_table_iter_init(&iter, rtp_ts_ht);
+	assert(g_hash_table_iter_next(&iter, NULL, &ts));
+	return GPOINTER_TO_UINT(ts);
+}
+
+static void test_dtmf_interleaved_audio(uint32_t input_ts) {
+	start();
+	ml_A->block_dtmf = BLOCK_DTMF_DTMF;
+	ml_A->dtmf_digit = 'D';
+	sdp_pt(0, PCMU, 8000);
+	sdp_pt(101, telephone-event, 8000);
+	offer();
+	sdp_pt(0, PCMU, 8000);
+	sdp_pt(101, telephone-event, 8000);
+	answer();
+	late_dtmf_packet(A, 0, PCMU_payload, 80000, 210, 0, PCMU_payload);
+	late_dtmf_packet(A, 101 | 0x80, "\x01\x0a\x00\xa0", input_ts, 201,
+			101 | 0x80, "\x0f\x0a\x00\xa0");
+	uint32_t event_ts = single_output_ts();
+	assert(event_ts != 0);
+	late_dtmf_packet(A, 0, PCMU_payload, 80160, 211, 0, PCMU_payload);
+	late_dtmf_packet(A, 101, "\x01\x8a\x01\xe0", input_ts, 202, 101, "\x0f\x8a\x01\xe0");
+	assert(single_output_ts() == event_ts);
+	late_dtmf_packet(A, 0, PCMU_payload, 80320, 212, 0, PCMU_payload);
+	late_dtmf_packet(A, 101, "\x01\x8a\x01\xe0", input_ts, 203, 101, "\x0f\x8a\x01\xe0");
+	assert(single_output_ts() == event_ts);
+	end();
+}
+
 int main(void) {
 	rtpe_common_config_ptr = &rtpe_config.common;
 	bufferpool_init();
@@ -426,6 +563,11 @@ int main(void) {
 	RAND_seed(&random_seed, sizeof(random_seed));
 	statistics_init();
 	codecs_init();
+
+	test_late_dtmf();
+	test_dtmf_wraparound();
+	test_dtmf_interleaved_audio(79920);
+	test_dtmf_interleaved_audio(0);
 
 	// plain
 	start();
